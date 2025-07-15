@@ -1,0 +1,40 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+env.bak/
+venv.bak/
+
+# Data files
+data/
+*.csv
+*.parquet
+*.feather
+
+# Model files
+models/
+*.joblib
+*.pkl
+*.h5
+
+# Reports
+reports/
+*.png
+*.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/
