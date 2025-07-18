@@ -8,7 +8,7 @@ import os
 from datetime import datetime, timedelta
 
 # Custom modules
-from utils.data_loader import fetch_nifty50_tickers, fetch_historical_data_parallel as fetch_historical_data
+from utils.data_loader import fetch_nifty50_tickers, fetch_historical_data_parallel as fetch_historical_data, load_from_csv
 from utils.feature_engineer import (
     create_features, 
     monte_carlo_forecast,
@@ -89,10 +89,13 @@ def load_and_process_data():
             st.error("Failed to fetch tickers")
             return {}
             
-        raw_data = fetch_historical_data(tickers)
+        raw_data = fetch_historical_data(tickers, start="2000-01-01")
         if not raw_data:
-            st.error("No historical data retrieved")
-            return {}
+            st.warning("Falling back to cached historical data")
+            raw_data = load_from_csv("data/historical")
+            if not raw_data:
+                st.error("No historical data available")
+                return {}
 
         featured_data = {}
         progress_bar = st.progress(0)

@@ -1,5 +1,4 @@
 # utils/data_loader.py
-
 import requests
 import yfinance as yf
 import pandas as pd
@@ -10,6 +9,7 @@ import logging
 from typing import Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+import requests_cache
 
 # Configure logging
 logging.basicConfig(
@@ -17,9 +17,11 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-# Expanded fallback list: NIFTY 50 + NIFTY Next 50 + some popular midcaps
+# Install cache
+requests_cache.install_cache('nse_cache', expire_after=3600)
+
+# Expanded fallback list: NIFTY 50 + NIFTY Next 50
 NIFTY100_FALLBACK = [
-    # NIFTY 50
     "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "HINDUNILVR.NS",
     "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS", "BHARTIARTL.NS", "LT.NS",
     "BAJFINANCE.NS", "ASIANPAINT.NS", "HCLTECH.NS", "MARUTI.NS", "TITAN.NS",
@@ -30,7 +32,7 @@ NIFTY100_FALLBACK = [
     "TATAMOTORS.NS", "BRITANNIA.NS", "CIPLA.NS", "SHREECEM.NS", "BAJAJ-AUTO.NS",
     "UPL.NS", "DIVISLAB.NS", "SBILIFE.NS", "EICHERMOT.NS", "HEROMOTOCO.NS",
     "BPCL.NS", "IOC.NS", "HDFC.NS", "APOLLOHOSP.NS", "ADANIENT.NS",
-    # NIFTY NEXT 50 and other large/midcaps (partial, update as needed)
+    # NIFTY NEXT 50
     "ABB.NS", "ACC.NS", "ADANIGREEN.NS", "ADANITRANS.NS", "AUROPHARMA.NS",
     "BANKBARODA.NS", "BERGEPAINT.NS", "BOSCHLTD.NS", "CANBK.NS", "CHOLAFIN.NS",
     "COLPAL.NS", "DABUR.NS", "DLF.NS", "GAIL.NS", "GODREJCP.NS",
@@ -46,20 +48,33 @@ NIFTY100_FALLBACK = [
     "MOTHERSON.NS"
 ]
 
+def get_nse_cookies():
+    """Get valid cookies from NSE homepage"""
+    session = requests.Session()
+    session.get(
+        "https://www.nseindia.com", 
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9"
+        },
+        timeout=10
+    )
+    return session.cookies.get_dict()
+
 def fetch_nifty50_tickers(use_fallback: bool = True) -> List[str]:
     """
     Fetch live Nifty 50 tickers from NSE API with fallback to a cached list.
     Returns: List of tickers in Yahoo Finance format (e.g., 'RELIANCE.NS')
     """
-    url = "https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%2050"
+    url = "https://www.nseindia.com/api/liveEquity-derivatives?index=top20_contracts"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36",
-        "Accept-Encoding": "gzip, deflate",
-        "Referer": "https://www.nseindia.com/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.nseindia.com/market-data/live-market-indices",
     }
     try:
-        session = requests.Session()
-        response = session.get(url, headers=headers, timeout=10)
+        cookies = get_nse_cookies()
+        response = requests.get(url, headers=headers, cookies=cookies, timeout=15)
         response.raise_for_status()
         data = response.json()
         return [item['symbol'] + ".NS" for item in data['data']]
@@ -76,8 +91,8 @@ def fetch_historical_data_parallel(
     max_retries: int = 3,
     delay: float = 2,
     max_workers: int = 4,
-    period: str = "max",
-    start: Optional[str] = None,
+    period: str = "10y",
+    start: Optional[str] = "2000-01-01",
     end: Optional[str] = None
 ) -> Dict[str, pd.DataFrame]:
     """
@@ -93,12 +108,26 @@ def fetch_historical_data_parallel(
         Dictionary of {ticker: DataFrame with historical data}
     """
     def fetch_single(ticker: str):
+        # Check cache first
+        cache_path = f"data/historical/{ticker.replace('.NS','')}.csv"
+        if os.path.exists(cache_path):
+            try:
+                df = pd.read_csv(cache_path, index_col="Date", parse_dates=True)
+                if not df.empty:
+                    logging.info(f"Loaded cached data for {ticker}")
+                    return ticker, df
+            except:
+                pass
+        
         for retry in range(max_retries):
             try:
-                if start or end:
-                    data = yf.Ticker(ticker).history(start=start, end=end, period=period)
-                else:
-                    data = yf.Ticker(ticker).history(period=period)
+                # Use yfinance with custom start date
+                data = yf.Ticker(ticker).history(
+                    period=period, 
+                    start=start, 
+                    end=end,
+                    auto_adjust=True
+                )
                 if not data.empty:
                     logging.info(f"Success: {ticker} ({len(data)} rows)")
                     return ticker, data
@@ -108,7 +137,7 @@ def fetch_historical_data_parallel(
             except Exception as e:
                 if "Too Many Requests" in str(e) or "rate limit" in str(e).lower():
                     logging.error(f"{ticker} rate-limited ({retry+1}/{max_retries}), sleeping...")
-                    # Exponential backoff with some random jitter to avoid simultaneous retries
+                    # Exponential backoff with random jitter
                     sleep_time = delay * (2 ** retry) + random.uniform(1, 5)
                     time.sleep(sleep_time)
                 else:
@@ -124,8 +153,11 @@ def fetch_historical_data_parallel(
             ticker, data = future.result()
             if data is not None:
                 historical_data[ticker] = data
-            # Short sleep to avoid hammering the API (especially important for Yahoo)
+            # Short sleep to avoid hammering the API
             time.sleep(delay + random.uniform(0, 2))
+    
+    # Save to cache
+    save_to_csv(historical_data)
     return historical_data
 
 def save_to_csv(
@@ -167,22 +199,14 @@ def load_from_csv(
     logging.info(f"Loaded data for {len(data_dict)} tickers from {dir_path}")
     return data_dict
 
-# Optional: utility to get latest valid tickers from fallback (removes delisted ones)
-def filter_valid_tickers(tickers: List[str]) -> List[str]:
-    valid = []
-    for ticker in tickers:
-        try:
-            info = yf.Ticker(ticker).info
-            if info and info.get("regularMarketPrice", None) is not None:
-                valid.append(ticker)
-        except Exception:
-            continue
-    return valid
-
 # Example usage:
 if __name__ == "__main__":
+    # Create data directory if not exists
+    os.makedirs("data/historical", exist_ok=True)
+    
+    # Fetch and save data
     tickers = fetch_nifty50_tickers()
     data = fetch_historical_data_parallel(
-        tickers, max_retries=3, delay=3, max_workers=3, period="max"
+        tickers, max_retries=3, delay=3, max_workers=3, period="10y"
     )
     save_to_csv(data, dir_path="data/historical")

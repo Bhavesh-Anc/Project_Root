@@ -441,15 +441,15 @@ def calculate_risk_score(df: pd.DataFrame) -> float:
         # Maximum drawdown
         rolling_max = df['Close'].expanding().max()
         drawdown = (df['Close'] - rolling_max) / rolling_max
-        max_drawdown = abs(drawdown.min())
-        dd_score = min(max_drawdown / 0.5, 1.0)
+        max_drawdown = abs(drawdown.min()) if not drawdown.empty else 0
+        dd_score = min(max_drawdown / 0.5, 1.0) if max_drawdown > 0 else 0
         
         # Volume volatility
         if 'Volume' in df.columns:
             volume_returns = df['Volume'].pct_change().dropna()
             if len(volume_returns) > 0:
                 volume_vol = volume_returns.std()
-                vol_vol_score = min(volume_vol / 2.0, 1.0)
+                vol_vol_score = min(volume_vol / 2.0, 1.0) if volume_vol > 0 else 0
             else:
                 vol_vol_score = 0.0
         else:

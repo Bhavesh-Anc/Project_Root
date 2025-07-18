@@ -100,7 +100,7 @@ class StockEvaluator:
                         continue
 
                     preds = model.model.predict(X_test)
-                    probas = model.model.predict_proba(X_test)[:, 1]
+                    probas = model.model.predict_proba(X_test)[:, 1] if hasattr(model.model, "predict_proba") else [0.5]*len(X_test)
 
                     metrics.append({
                         'ticker': ticker,
@@ -215,6 +215,10 @@ class StockEvaluator:
                     if 'Close' not in df.columns:
                         continue
 
+                    # Skip if not enough data
+                    if len(df) < horizon_days:
+                        continue
+                        
                     returns = np.log(1 + df['Close'].pct_change().dropna())
                     if returns.empty:
                         continue
@@ -223,6 +227,10 @@ class StockEvaluator:
                     tasks.append((mean, std, horizon_days, n_simulations))
                     tickers.append(ticker)
 
+                # Skip if no tasks
+                if not tasks:
+                    continue
+                    
                 # Parallel execution
                 if parallel and len(tasks) > 1:
                     with ProcessPoolExecutor() as executor:
@@ -231,12 +239,13 @@ class StockEvaluator:
                     results = [_single_simulation(args) for args in tasks]
 
                 for ticker, final_returns in zip(tickers, results):
-                    all_simulations.append({
-                        'ticker': ticker,
-                        'mean_return': np.mean(final_returns),
-                        'p5': np.percentile(final_returns, 5),
-                        'p95': np.percentile(final_returns, 95)
-                    })
+                    if len(final_returns) > 0:
+                        all_simulations.append({
+                            'ticker': ticker,
+                            'mean_return': np.mean(final_returns),
+                            'p5': np.percentile(final_returns, 5),
+                            'p95': np.percentile(final_returns, 95)
+                        })
 
                 self.monte_carlo_results[horizon] = pd.DataFrame(all_simulations)
             except Exception as e:

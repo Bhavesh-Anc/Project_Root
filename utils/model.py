@@ -14,7 +14,6 @@ from tqdm import tqdm
 import warnings
 from xgboost import XGBClassifier
 from sklearn.base import clone
-from .feature_engineer import calculate_risk_score
 
 # Enhanced Configuration
 MODEL_CONFIG = {
@@ -151,13 +150,17 @@ class StockPredictor:
                     'n_estimators': trial.suggest_categorical('n_estimators',
                                  MODEL_CONFIG['param_space']['xgboost']['n_estimators']),
                     'max_depth': trial.suggest_int('max_depth',
-                                      min(MODEL_CONFIG['param_space']['xgboost']['max_depth'])),
+                                      min(MODEL_CONFIG['param_space']['xgboost']['max_depth']),
+                                      max(MODEL_CONFIG['param_space']['xgboost']['max_depth'])),
                     'learning_rate': trial.suggest_float('learning_rate',
-                                      min(MODEL_CONFIG['param_space']['xgboost']['learning_rate'])),
+                                      min(MODEL_CONFIG['param_space']['xgboost']['learning_rate']),
+                                      max(MODEL_CONFIG['param_space']['xgboost']['learning_rate'])),
                     'subsample': trial.suggest_float('subsample',
-                                    min(MODEL_CONFIG['param_space']['xgboost']['subsample'])),
+                                    min(MODEL_CONFIG['param_space']['xgboost']['subsample']),
+                                    max(MODEL_CONFIG['param_space']['xgboost']['subsample'])),
                     'colsample_bytree': trial.suggest_float('colsample_bytree',
-                                          min(MODEL_CONFIG['param_space']['xgboost']['colsample_bytree']))
+                                          min(MODEL_CONFIG['param_space']['xgboost']['colsample_bytree']),
+                                          max(MODEL_CONFIG['param_space']['xgboost']['colsample_bytree']))
                 }
                 model = XGBClassifier(**params)
                 
@@ -166,13 +169,17 @@ class StockPredictor:
                     'n_estimators': trial.suggest_categorical('n_estimators',
                                  MODEL_CONFIG['param_space']['gradient_boosting']['n_estimators']),
                     'learning_rate': trial.suggest_float('learning_rate',
-                                      min(MODEL_CONFIG['param_space']['gradient_boosting']['learning_rate'])),
+                                      min(MODEL_CONFIG['param_space']['gradient_boosting']['learning_rate']),
+                                      max(MODEL_CONFIG['param_space']['gradient_boosting']['learning_rate'])),
                     'max_depth': trial.suggest_int('max_depth',
-                               min(MODEL_CONFIG['param_space']['gradient_boosting']['max_depth'])),
+                               min(MODEL_CONFIG['param_space']['gradient_boosting']['max_depth']),
+                               max(MODEL_CONFIG['param_space']['gradient_boosting']['max_depth'])),
                     'min_samples_split': trial.suggest_int('min_samples_split',
-                                       min(MODEL_CONFIG['param_space']['gradient_boosting']['min_samples_split'])),
+                                       min(MODEL_CONFIG['param_space']['gradient_boosting']['min_samples_split']),
+                                       max(MODEL_CONFIG['param_space']['gradient_boosting']['min_samples_split'])),
                     'min_samples_leaf': trial.suggest_int('min_samples_leaf',
-                                      min(MODEL_CONFIG['param_space']['gradient_boosting']['min_samples_leaf']))
+                                      min(MODEL_CONFIG['param_space']['gradient_boosting']['min_samples_leaf']),
+                                      max(MODEL_CONFIG['param_space']['gradient_boosting']['min_samples_leaf']))
                 }
                 model = GradientBoostingClassifier(**params)
             
@@ -215,22 +222,26 @@ class StockPredictor:
             cloned_model = clone(model)
             cloned_model.fit(X_train, y_train)
             preds = cloned_model.predict(X_val)
-            probas = cloned_model.predict_proba(X_val)[:, 1]
+            probas = cloned_model.predict_proba(X_val)[:, 1] if hasattr(cloned_model, "predict_proba") else [0.5]*len(X_val)
             
             metrics['precision'].append(precision_score(y_val, preds, zero_division=0))
             metrics['recall'].append(recall_score(y_val, preds, zero_division=0))
             metrics['f1'].append(f1_score(y_val, preds, zero_division=0))
-            metrics['roc_auc'].append(roc_auc_score(y_val, probas) if len(np.unique(y_val)) > 1 else 0.5)
+            try:
+                metrics['roc_auc'].append(roc_auc_score(y_val, probas) if len(np.unique(y_val)) > 1 else 0.5)
+            except:
+                metrics['roc_auc'].append(0.5)
         
         self.cv_scores = {k: np.mean(v) for k, v in metrics.items()}
 
     def _post_training_analysis(self, X: pd.DataFrame, y: pd.Series):
         """Calculate feature importance and uncertainty estimates"""
-        self.feature_importances = dict(zip(X.columns, self.model.feature_importances_))
+        if hasattr(self.model, 'feature_importances_'):
+            self.feature_importances = dict(zip(X.columns, self.model.feature_importances_))
         self.required_features = X.columns.tolist()
         
         # Uncertainty estimation using bootstrap approach
-        if self.model_type == 'random_forest':
+        if self.model_type == 'random_forest' and hasattr(self.model, 'estimators_'):
             self.uncertainty_estimates = {
                 'std': np.std([tree.predict_proba(X)[:, 1] for tree in self.model.estimators_], axis=0),
                 'min': np.min([tree.predict_proba(X)[:, 1] for tree in self.model.estimators_], axis=0),
@@ -281,6 +292,10 @@ def train_all_models(featured_data: Dict[str, pd.DataFrame],
                         X_test = test[pure_features]
                         y_test = test[target_col]
                         
+                        # Skip if insufficient data
+                        if X_train.empty or len(X_train) < 50:
+                            continue
+                            
                         # Train and validate
                         predictor = StockPredictor(horizon, model_type)
                         predictor.train(X_train, y_train, tune=True)
@@ -291,8 +306,11 @@ def train_all_models(featured_data: Dict[str, pd.DataFrame],
                         
                         # Evaluate on test set
                         if not X_test.empty:
+                            if not hasattr(predictor.model, "predict"):
+                                continue
+                                
                             test_preds = predictor.model.predict(X_test)
-                            test_probas = predictor.model.predict_proba(X_test)[:, 1]
+                            test_probas = predictor.model.predict_proba(X_test)[:, 1] if hasattr(predictor.model, "predict_proba") else [0.5]*len(X_test)
                             
                             metrics.append({
                                 'ticker': ticker,
@@ -302,14 +320,15 @@ def train_all_models(featured_data: Dict[str, pd.DataFrame],
                                 'recall': recall_score(y_test, test_preds, zero_division=0),
                                 'f1': f1_score(y_test, test_preds, zero_division=0),
                                 'roc_auc': roc_auc_score(y_test, test_probas) if len(np.unique(y_test)) > 1 else 0.5,
-                                'cv_score': predictor.cv_scores['roc_auc']
+                                'cv_score': predictor.cv_scores['roc_auc'] if predictor.cv_scores else 0.5
                             })
                             
                     except Exception as e:
                         warnings.warn(f"{ticker} {horizon} {model_type} failed: {str(e)}")
                         continue
                         
-            all_models[ticker] = ticker_models
+            if ticker_models:
+                all_models[ticker] = ticker_models
             gc.collect()
             
         except Exception as e:
@@ -318,7 +337,7 @@ def train_all_models(featured_data: Dict[str, pd.DataFrame],
             
     return {
         'models': all_models,
-        'metrics': pd.DataFrame(metrics)
+        'metrics': pd.DataFrame(metrics) if metrics else pd.DataFrame()
     }
 
 def save_models(models: Dict[str, Any], directory: str = "models"):
@@ -414,26 +433,46 @@ def predict_returns(models: Dict[str, Any],
                 continue
                 
             # Prepare prediction data
-            latest_data = current_data[ticker].iloc[[-1]].copy()
+            df = current_data[ticker]
+            if df.empty:
+                continue
+                
+            latest_data = df.iloc[[-1]].copy()
             latest_data = latest_data[[col for col in latest_data.columns 
                                      if not col.startswith('Target_')]]
             
             horizon_model = model_dict.get(model_key)
             
-            if not horizon_model or not horizon_model.model:
+            if not horizon_model or not hasattr(horizon_model, 'model') or not horizon_model.model:
                 continue
 
             # Validate feature compatibility
+            if not hasattr(horizon_model, 'required_features'):
+                continue
+                
             missing_features = set(horizon_model.required_features) - set(latest_data.columns)
             if missing_features:
-                warnings.warn(f"Skipping {ticker} - missing: {missing_features}")
-                continue
+                # Try to impute missing features with mean
+                for feature in missing_features:
+                    if feature in df.columns:
+                        latest_data[feature] = df[feature].mean()
+                remaining = set(horizon_model.required_features) - set(latest_data.columns)
+                if remaining:
+                    warnings.warn(f"Skipping {ticker} - missing: {remaining}")
+                    continue
 
-            # Generate predictions with uncertainty
-            proba = horizon_model.model.predict_proba(latest_data[horizon_model.required_features])[0][1]
-            prediction = horizon_model.model.predict(latest_data[horizon_model.required_features])[0]
-            
-            risk = calculate_risk_score(current_data[ticker])
+            # Generate predictions
+            try:
+                if hasattr(horizon_model.model, "predict_proba"):
+                    proba = horizon_model.model.predict_proba(latest_data[horizon_model.required_features])[0][1]
+                else:
+                    proba = 0.5
+                prediction = horizon_model.model.predict(latest_data[horizon_model.required_features])[0]
+            except Exception as e:
+                warnings.warn(f"Prediction failed for {ticker}: {str(e)}")
+                continue
+                
+            risk = calculate_risk_score(df)
             
             pred_dict = {
                 'ticker': ticker,
@@ -445,16 +484,19 @@ def predict_returns(models: Dict[str, Any],
             }
             
             # Add uncertainty estimates if available
-            if horizon_model.uncertainty_estimates:
-                pred_dict.update({
-                    'prob_std': horizon_model.uncertainty_estimates['std'][0],
-                    'prob_range': (horizon_model.uncertainty_estimates['min'][0],
-                                  horizon_model.uncertainty_estimates['max'][0])
-                })
+            if hasattr(horizon_model, 'uncertainty_estimates') and horizon_model.uncertainty_estimates:
+                try:
+                    pred_dict.update({
+                        'prob_std': horizon_model.uncertainty_estimates['std'][0],
+                        'prob_range': (horizon_model.uncertainty_estimates['min'][0],
+                                      horizon_model.uncertainty_estimates['max'][0])
+                    })
+                except:
+                    pass
             
             predictions.append(pred_dict)
         except Exception as e:
             warnings.warn(f"Prediction failed for {ticker}: {str(e)}")
             continue
             
-    return pd.DataFrame(predictions)
+    return pd.DataFrame(predictions) if predictions else pd.DataFrame()
