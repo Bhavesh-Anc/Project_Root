@@ -1,3 +1,2 @@
-# utils/__init__.py
-from .data_loader import fetch_nifty50_tickers
-from .indian_data_loader import fetch_historical_data_parallel
+# Leave this file empty
+# This allows the utils directory to be treated as a Python package
