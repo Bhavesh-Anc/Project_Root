@@ -5,10 +5,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+import time
 from datetime import datetime, timedelta
+import warnings
 
 # Custom modules
-from utils.data_loader import fetch_nifty50_tickers, fetch_historical_data_parallel as fetch_historical_data
+from utils.data_loader import fetch_nifty50_tickers
+from utils.indian_data_loader import fetch_historical_data_parallel as fetch_historical_data
 from utils.feature_engineer import (
     create_features, 
     monte_carlo_forecast,
@@ -18,6 +21,9 @@ from utils.feature_engineer import (
 )
 from utils.model import load_models, predict_returns, train_all_models, save_models
 from utils.evaluator import StockEvaluator, COLORS
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
 
 # Configuration
 st.set_page_config(
@@ -39,6 +45,7 @@ st.markdown("""
     .risk-high {color: #F44336;}
     .risk-medium {color: #FFC107;}
     .risk-low {color: #4CAF50;}
+    .stSpinner > div > div {border-top-color: #4CAF50;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -70,6 +77,7 @@ def get_user_inputs():
             
             if submitted:
                 st.session_state['submitted'] = True
+                st.session_state['data_loaded'] = False  # Reset data loaded state
                 
             st.markdown("---")
             st.markdown("📊 **Advanced Analytics:**")
@@ -80,7 +88,7 @@ def get_user_inputs():
     
     return investment, duration, risk_tolerance, submitted
 
-@st.cache_data(ttl=24*3600, show_spinner="Loading market data...")
+@st.cache_data(ttl=24*3600, show_spinner=False)
 def load_and_process_data():
     """Load and process market data with enhanced error handling"""
     try:
@@ -89,14 +97,28 @@ def load_and_process_data():
             st.error("Failed to fetch tickers")
             return {}
             
-        raw_data = fetch_historical_data(tickers)
+        # Show progress message
+        progress_text = st.empty()
+        progress_text.info("Fetching market data from Indian stock exchanges...")
+        
+        # Get Alpha Vantage API key from environment
+        api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
+        
+        # Fetch historical data
+        raw_data = fetch_historical_data(
+            tickers, 
+            api_key=api_key
+        )
+        
         if not raw_data:
             st.error("No historical data retrieved")
             return {}
 
-        featured_data = {}
+        # Process data
+        progress_text.info("Processing market data and creating features...")
         progress_bar = st.progress(0)
         total_tickers = len(raw_data)
+        featured_data = {}
         
         for i, (ticker, df) in enumerate(raw_data.items()):
             try:
@@ -107,7 +129,7 @@ def load_and_process_data():
                 st.warning(f"Error processing {ticker}: {str(e)}")
             progress_bar.progress((i+1)/total_tickers)
             
-        st.info(f"Processed {len(featured_data)}/{total_tickers} tickers successfully")
+        progress_text.success(f"Processed {len(featured_data)}/{total_tickers} tickers successfully")
         return featured_data
     
     except Exception as e:
@@ -172,10 +194,16 @@ def main():
     st.title("📈 AI-Powered Stock Recommendation System Pro")
     st.markdown("**Advanced Investing with Machine Learning & Risk Analysis**")
     
+    # Initialize session states
+    if 'submitted' not in st.session_state:
+        st.session_state['submitted'] = False
+    if 'data_loaded' not in st.session_state:
+        st.session_state['data_loaded'] = False
+    
     # Get user inputs
     investment, duration, risk_tolerance, submitted = get_user_inputs()
     
-    if not submitted and 'submitted' not in st.session_state:
+    if not st.session_state['submitted']:
         st.info("Please configure your investment parameters in the sidebar and click 'Generate Recommendations'")
         return
 
@@ -192,11 +220,16 @@ def main():
     horizon = horizon_map.get(duration, "next_year")
     
     # Load data with progress
-    with st.spinner("Loading and processing market data..."):
-        featured_data = load_and_process_data()
-        if not featured_data:
-            return
-
+    if not st.session_state.get('data_loaded', False):
+        with st.spinner("Loading and processing market data..."):
+            featured_data = load_and_process_data()
+            if not featured_data:
+                return
+            st.session_state['featured_data'] = featured_data
+            st.session_state['data_loaded'] = True
+    
+    featured_data = st.session_state['featured_data']
+    
     # Handle models (load or train)
     models = handle_models(featured_data)
     if not models:
@@ -254,7 +287,7 @@ def main():
             risk_class = get_risk_class(row['risk_score'])
             
             display_metric_card(
-                label=row['ticker'],
+                label=row['ticker'].replace(".NS", ""),
                 value=f"₹{row['current_price']:,.1f}",
                 delta=f"{row['success_prob']:.1%} Success",
                 delta_color=delta_color
@@ -284,7 +317,7 @@ def main():
     df = featured_data[selected_ticker]
     
     # Enhanced Price Analysis
-    st.subheader(f"{selected_ticker} Technical Analysis")
+    st.subheader(f"{selected_ticker.replace('.NS', '')} Technical Analysis")
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [2, 1]})
     
     # Price and Moving Averages
@@ -296,8 +329,9 @@ def main():
     ax1.legend()
     
     # Volume Analysis
-    df['Volume'].plot(ax=ax2, color=COLORS['good'])
-    ax2.set_title("Trading Volume")
+    if 'Volume' in df.columns:
+        df['Volume'].plot(ax=ax2, color=COLORS['good'])
+        ax2.set_title("Trading Volume")
     
     st.pyplot(fig)
     plt.close()
@@ -359,7 +393,7 @@ def main():
         for idx, ticker in enumerate(selected_stocks):
             with cols[idx]:
                 alloc = st.slider(
-                    f"{ticker} Allocation",
+                    f"{ticker.replace('.NS', '')} Allocation",
                     0, 100, 
                     defaults[ticker],
                     key=f"alloc_{ticker}"
@@ -398,7 +432,8 @@ def main():
             st.write("**Performance Metrics**")
             st.metric("Expected Success Probability", f"{portfolio_return:.1%}")
             st.metric("Composite Risk Score", f"{portfolio_risk:.2f}")
-            st.metric("Risk-Adjusted Return", f"{(portfolio_return/portfolio_risk):.2f}" if portfolio_risk > 0 else "N/A")
+            st.metric("Risk-Adjusted Return", 
+                     f"{(portfolio_return/(portfolio_risk + 1e-6)):.2f}" if portfolio_risk > 0 else "N/A")
         
         # Advanced Risk-Return Visualization
         st.subheader("Portfolio Optimization")
@@ -409,7 +444,7 @@ def main():
                 recommendations.set_index('ticker').loc[t]['risk_score'],
                 recommendations.set_index('ticker').loc[t]['success_prob'],
                 s=200 * allocations[t],
-                label=t,
+                label=t.replace('.NS', ''),
                 alpha=0.7
             )
         

@@ -12,9 +12,19 @@ from sklearn.metrics import (
     roc_auc_score, confusion_matrix, classification_report
 )
 from tqdm import tqdm
-from .feature_engineer import HORIZONS
 from functools import lru_cache
 from concurrent.futures import ProcessPoolExecutor, as_completed
+
+# Define HORIZONS locally to avoid circular import
+HORIZONS = {
+    'next_day': 1,
+    'next_week': 5,
+    'next_month': 22,
+    'next_quarter': 66,
+    'next_year': 252,
+    'next_3_years': 756,
+    'next_5_years': 1260
+}
 
 # Configuration
 COLORS = {
@@ -24,6 +34,7 @@ COLORS = {
 }
 
 def _single_simulation(args):
+    """Helper function for parallel Monte Carlo simulation"""
     mean, std, horizon_days, n_simulations = args
     # Vectorized simulation for one ticker
     simulations = np.random.normal(mean, std, (n_simulations, horizon_days)).cumsum(axis=1)
@@ -75,10 +86,17 @@ class StockEvaluator:
                         continue
                         
                     target_col = f"Target_{horizon}"
+                    if target_col not in test.columns:
+                        continue
+                        
                     X_test = test.drop(columns=[target_col], errors='ignore')
                     y_test = test[target_col]
                     
                     if X_test.empty or y_test.empty:
+                        continue
+
+                    # Check if model has required attributes
+                    if not hasattr(model, 'model') or model.model is None:
                         continue
 
                     preds = model.model.predict(X_test)
@@ -111,7 +129,7 @@ class StockEvaluator:
         for ticker, model_dict in self.models.items():
             for horizon, model in model_dict.items():
                 try:
-                    if not model.feature_importances:
+                    if not hasattr(model, 'feature_importances') or not model.feature_importances:
                         continue
                         
                     for feature, importance in model.feature_importances.items():
@@ -143,6 +161,10 @@ class StockEvaluator:
                 max_drawdown = (df['Close'].cummax() - df['Close']).max() / df['Close'].cummax().max()
                 volume_volatility = df['Volume'].pct_change().std()
                 
+                # Handle NaN values
+                if np.isnan(volume_volatility):
+                    volume_volatility = 0
+                
                 risk_score = 0.4*volatility + 0.3*max_drawdown + 0.2*volume_volatility
                 
                 risk_data.append({
@@ -159,6 +181,7 @@ class StockEvaluator:
 
     @lru_cache(maxsize=32)
     def _returns_cache(self, ticker, horizon_days):
+        """Cache returns calculation for performance"""
         df = self.data[ticker]
         returns = np.log(1 + df['Close'].pct_change().dropna())
         return returns.mean(), returns.std()
@@ -169,20 +192,25 @@ class StockEvaluator:
             return
             
         try:
+            # Get sample model to find long-term horizons
             sample_model = next(iter(self.models.values()))
-            long_term_horizons = [h for h in sample_model if 'year' in h]
+            long_term_horizons = [h for h in sample_model.keys() if 'year' in h]
         except StopIteration:
             return
 
         for horizon in long_term_horizons:
             try:
-                horizon_days = HORIZONS.get(horizon)
+                # Extract horizon name without model type prefix
+                horizon_name = horizon.split('_', 1)[-1] if '_' in horizon else horizon
+                horizon_days = HORIZONS.get(horizon_name)
+                
                 if not horizon_days:
                     continue
                     
                 all_simulations = []
                 tasks = []
                 tickers = []
+                
                 for ticker, df in self.data.items():
                     if 'Close' not in df.columns:
                         continue
@@ -234,9 +262,12 @@ class StockEvaluator:
     def _save_metric_reports(self, output_dir: str):
         """Save numerical reports to CSV"""
         try:
-            self.metrics.to_csv(os.path.join(output_dir, 'performance_metrics.csv'), index=False)
-            self.risk_scores.to_csv(os.path.join(output_dir, 'risk_scores.csv'), index=False)
-            self.feature_importances.to_csv(os.path.join(output_dir, 'feature_importances.csv'), index=False)
+            if not self.metrics.empty:
+                self.metrics.to_csv(os.path.join(output_dir, 'performance_metrics.csv'), index=False)
+            if not self.risk_scores.empty:
+                self.risk_scores.to_csv(os.path.join(output_dir, 'risk_scores.csv'), index=False)
+            if not self.feature_importances.empty:
+                self.feature_importances.to_csv(os.path.join(output_dir, 'feature_importances.csv'), index=False)
         except Exception as e:
             warnings.warn(f"Failed to save reports: {str(e)}")
 
@@ -248,6 +279,7 @@ class StockEvaluator:
                 sns.boxplot(data=self.metrics, x='horizon', y='roc_auc', palette='viridis')
                 plt.title('Model Performance by Horizon')
                 plt.xticks(rotation=45)
+                plt.tight_layout()
                 plt.savefig(os.path.join(output_dir, 'performance_by_horizon.png'), bbox_inches='tight')
                 plt.close()
             except Exception as e:
@@ -265,6 +297,7 @@ class StockEvaluator:
                 plt.figure(figsize=(10, 6))
                 top_features.sort_values().plot(kind='barh', color=COLORS['neutral'])
                 plt.title('Top 10 Most Important Features')
+                plt.tight_layout()
                 plt.savefig(os.path.join(output_dir, 'feature_importances.png'), bbox_inches='tight')
                 plt.close()
             except Exception as e:
@@ -280,6 +313,7 @@ class StockEvaluator:
                 sns.scatterplot(data=merged, x='composite_risk', y='roc_auc', 
                                 hue='horizon', palette='viridis', s=100)
                 plt.title('Risk-Reward Relationship')
+                plt.tight_layout()
                 plt.savefig(os.path.join(output_dir, 'risk_reward.png'), bbox_inches='tight')
                 plt.close()
             except Exception as e:
@@ -291,11 +325,13 @@ class StockEvaluator:
             try:
                 if not results.empty:
                     plt.figure(figsize=(12, 6))
-                    sns.barplot(data=results.nlargest(10, 'mean_return'), 
+                    top_results = results.nlargest(10, 'mean_return')
+                    sns.barplot(data=top_results, 
                                 x='ticker', y='mean_return',
                                 palette='viridis')
                     plt.title(f'{horizon.replace("_", " ").title()} Projections')
                     plt.xticks(rotation=45)
+                    plt.tight_layout()
                     plt.savefig(os.path.join(output_dir, f'monte_carlo_{horizon}.png'), 
                                 bbox_inches='tight')
                     plt.close()
@@ -321,7 +357,7 @@ class StockEvaluator:
             return pd.DataFrame()
             
         merged = self.metrics.merge(self.risk_scores, on='ticker')
-        merged['risk_adj_return'] = merged['roc_auc'] / merged['composite_risk']
+        merged['risk_adj_return'] = merged['roc_auc'] / (merged['composite_risk'] + 1e-6)  # Add small epsilon
         return merged.nlargest(n, 'risk_adj_return')[['ticker', 'risk_adj_return']]
 
 def load_evaluation(output_dir: str = "reports") -> Dict[str, pd.DataFrame]:
@@ -341,15 +377,19 @@ def load_evaluation(output_dir: str = "reports") -> Dict[str, pd.DataFrame]:
 
 if __name__ == "__main__":
     # Example usage
-    from utils.model import load_models
-    from utils.feature_engineer import load_processed_data
-    
-    data = load_processed_data()
-    models = load_models()
-    
-    if models and data:
-        evaluator = StockEvaluator(models, data)
-        evaluator.full_evaluation()
-        print("Top Performers:", evaluator.get_top_performers())
-    else:
-        print("Evaluation failed - missing data or models")
+    try:
+        from utils.model import load_models
+        from utils.feature_engineer import load_processed_data
+        
+        data = load_processed_data()
+        models = load_models()
+        
+        if models and data:
+            evaluator = StockEvaluator(models, data)
+            evaluator.full_evaluation()
+            print("Top Performers:", evaluator.get_top_performers())
+        else:
+            print("Evaluation failed - missing data or models")
+    except ImportError as e:
+        print(f"Import error: {e}")
+        print("Please ensure all required modules are available")

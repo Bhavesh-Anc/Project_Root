@@ -1,4 +1,5 @@
 # utils/model.py
+from .feature_engineer import calculate_risk_score
 import numpy as np
 import pandas as pd
 import joblib
@@ -150,9 +151,9 @@ class StockPredictor:
                     'n_estimators': trial.suggest_categorical('n_estimators',
                                  MODEL_CONFIG['param_space']['xgboost']['n_estimators']),
                     'max_depth': trial.suggest_int('max_depth',
-                                      min(MODEL_CONFIG['param_space']['xgboost']['max_depth']),
+                                      min(MODEL_CONFIG['param_space']['xgboost']['max_depth'])),
                     'learning_rate': trial.suggest_float('learning_rate',
-                                      min(MODEL_CONFIG['param_space']['xgboost']['learning_rate']),
+                                      min(MODEL_CONFIG['param_space']['xgboost']['learning_rate'])),
                     'subsample': trial.suggest_float('subsample',
                                     min(MODEL_CONFIG['param_space']['xgboost']['subsample'])),
                     'colsample_bytree': trial.suggest_float('colsample_bytree',
@@ -333,7 +334,8 @@ def save_models(models: Dict[str, Any], directory: str = "models"):
                 try:
                     clean_ticker = ticker.replace(".NS", "")
                     filename = f"{clean_ticker}_{model_key}.joblib"
-                    joblib.dump(model, os.path.join(version_dir, filename))
+                    filepath = os.path.join(version_dir, filename)
+                    joblib.dump(model, filepath)
                     
                     # Save metadata
                     metadata = {

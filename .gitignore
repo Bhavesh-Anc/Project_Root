@@ -38,3 +38,8 @@ Thumbs.db
 
 # Streamlit
 .streamlit/
+
+indian_stock_data/
+*.csv
+*.joblib
+__pycache__/
