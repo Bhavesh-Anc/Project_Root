@@ -120,6 +120,12 @@ class StockPredictor:
             raise ValueError(f"Unknown model type: {self.model_type}")
         return model
 
+    def _validate_features(self, X: pd.DataFrame):
+        """Validate that required features exist"""
+        if X.empty:
+            raise ValueError("Empty feature set provided for training")
+        self.required_features = X.columns.tolist()
+
     def _hyperparameter_tuning(self, X: pd.DataFrame, y: pd.Series):
         """Enhanced Optuna-based hyperparameter optimization with pruning"""
         def objective(trial):
@@ -374,6 +380,7 @@ def save_models(models: Dict[str, Any], directory: str = "models"):
         if os.path.exists(latest_path):
             os.remove(latest_path)
         os.symlink(version_dir, latest_path)
+        print(f"Models saved to {version_dir} and symlinked to {latest_path}")
         
     except Exception as e:
         warnings.warn(f"Failed to save models: {str(e)}")
@@ -385,7 +392,7 @@ def load_models(directory: str = "models", version: str = "latest") -> Dict[str,
     
     try:
         if not os.path.exists(version_dir):
-            warnings.warn(f"Model directory {version_dir} not found")
+            # Don't warn here - it's expected behavior for first run
             return loaded_models
             
         for filename in os.listdir(version_dir):
