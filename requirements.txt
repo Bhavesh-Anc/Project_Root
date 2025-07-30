@@ -1,13 +1,43 @@
-streamlit==1.32.2
-pandas==2.0.3
-numpy==1.24.3
-matplotlib==3.7.1
-seaborn==0.12.2
-scikit-learn==1.3.0
-yfinance==0.2.38
-optuna==3.4.0
-xgboost==2.0.0
-tqdm==4.66.1
-joblib==1.3.2
-requests==2.31.0
-requests-cache==1.2.0
+# Core Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+scipy>=1.10.0
+
+# Machine Learning
+xgboost>=1.7.0
+optuna>=3.0.0
+joblib>=1.3.0
+
+# Financial Data
+yfinance>=0.2.0
+ta>=0.10.0
+tqdm>=4.65.0
+
+# Web Framework
+streamlit>=1.28.0
+plotly>=5.15.0
+
+# Parallel Processing
+tqdm>=4.65.0
+
+# Utilities
+requests>=2.31.0
+python-dateutil>=2.8.0
+pytz>=2023.3
+
+# Optional Performance Boosts
+numba>=0.57.0  # For numerical computations
+bottleneck>=1.3.0  # For pandas performance
+tables>=3.8.0  # For HDF5 storage (optional)
+
+# Development Tools (optional)
+jupyter>=1.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# System Requirements
+python>=3.8
+catboost>=1.7.0  # For categorical data handling in XGBoost
+lightgbm>=3.3.0  # For alternative boosting methods
+fastparquet>=2023.9.0  # For fast parquet file handling
