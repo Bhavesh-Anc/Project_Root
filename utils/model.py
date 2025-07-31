@@ -1,12 +1,34 @@
+# utils/model.py
 import pickle
 import hashlib
 from datetime import datetime, timedelta
 import logging
 import json
+import warnings
+import os
+import numpy as np
+import pandas as pd
+import optuna
 from sklearn.inspection import permutation_importance
 from sklearn.calibration import CalibratedClassifierCV
 import lightgbm as lgb
 from catboost import CatBoostClassifier
+from sklearn.ensemble import (
+    RandomForestClassifier, 
+    VotingClassifier, 
+    ExtraTreesClassifier
+)
+from sklearn.neural_network import MLPClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import RobustScaler
+from sklearn.model_selection import (
+    TimeSeriesSplit, 
+    cross_val_score
+)
+from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing as mp
+from typing import Dict, List, Tuple, Any, Optional
 
 warnings.filterwarnings('ignore')
 
@@ -84,6 +106,51 @@ ENHANCED_MODEL_CONFIG = {
     'model_selection_metric': 'roc_auc',
     'ensemble_size': 5  # Number of models in ensemble
 }
+
+# ==================== MODEL SAVING/LOADING ====================
+
+def save_models_optimized(models: Dict[str, Any], cache_dir: str = None):
+    """Save models to cache directory"""
+    cache_dir = cache_dir or ENHANCED_MODEL_CONFIG.get('cache_dir', 'model_cache_enhanced')
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    for ticker, model_dict in models.items():
+        for model_key, predictor in model_dict.items():
+            # Create a unique filename for each model
+            filename = f"{ticker}_{model_key}.pkl"
+            filepath = os.path.join(cache_dir, filename)
+            with open(filepath, 'wb') as f:
+                pickle.dump(predictor, f, protocol=pickle.HIGHEST_PROTOCOL)
+                
+    logging.info(f"Saved {len(models)} tickers' models to {cache_dir}")
+
+def load_models_optimized(cache_dir: str = None) -> Dict[str, Any]:
+    """Load models from cache directory"""
+    cache_dir = cache_dir or ENHANCED_MODEL_CONFIG.get('cache_dir', 'model_cache_enhanced')
+    models = {}
+    
+    if not os.path.exists(cache_dir):
+        return models
+        
+    for filename in os.listdir(cache_dir):
+        if filename.endswith('.pkl'):
+            filepath = os.path.join(cache_dir, filename)
+            try:
+                # Extract ticker and model_key from filename
+                ticker, model_key = filename[:-4].split('_', 1)
+                
+                with open(filepath, 'rb') as f:
+                    predictor = pickle.load(f)
+                    
+                if ticker not in models:
+                    models[ticker] = {}
+                models[ticker][model_key] = predictor
+                
+            except Exception as e:
+                logging.warning(f"Failed to load model {filename}: {e}")
+                
+    logging.info(f"Loaded {len(models)} tickers' models from {cache_dir}")
+    return models
 
 # ==================== ENHANCED MODEL CLASSES ====================
 
@@ -208,6 +275,7 @@ class IntelligentFeatureSelector:
         # 3. Univariate statistical tests
         if 'univariate' in self.selection_methods:
             try:
+                from sklearn.feature_selection import SelectKBest, f_classif
                 selector = SelectKBest(score_func=f_classif, k=min(self.top_k * 2, len(feature_names)))
                 selector.fit(X.fillna(0), y)
                 scores = selector.scores_
@@ -221,6 +289,7 @@ class IntelligentFeatureSelector:
         # 4. Recursive feature elimination (sample)
         if 'recursive' in self.selection_methods and len(feature_names) < 200:
             try:
+                from sklearn.feature_selection import RFE
                 rf = RandomForestClassifier(n_estimators=50, random_state=42)
                 selector = RFE(rf, n_features_to_select=min(self.top_k, len(feature_names)), step=0.1)
                 selector.fit(X.fillna(0), y)
@@ -251,6 +320,7 @@ class AdvancedHyperparameterOptimizer:
         
     def optimize_xgboost(self, X: np.ndarray, y: np.ndarray) -> Dict[str, Any]:
         """Optimize XGBoost hyperparameters"""
+        from xgboost import XGBClassifier
         
         def objective(trial):
             params = {
@@ -342,6 +412,7 @@ class AdvancedEnsembleBuilder:
         models = []
         
         # XGBoost variants
+        from xgboost import XGBClassifier
         models.append(XGBClassifier(
             n_estimators=500, max_depth=6, learning_rate=0.1,
             subsample=0.8, colsample_bytree=0.8, random_state=42
@@ -371,7 +442,6 @@ class AdvancedEnsembleBuilder:
         ))
         
         # Extra Trees
-        from sklearn.ensemble import ExtraTreesClassifier
         models.append(ExtraTreesClassifier(
             n_estimators=500, max_depth=15, min_samples_split=5,
             class_weight='balanced', random_state=42
@@ -521,13 +591,59 @@ def train_enhanced_model(args) -> Tuple[str, str, AdvancedStockPredictor, float]
         test_proba = model.predict_proba(X_test_scaled)[:, 1] if hasattr(model, 'predict_proba') else [0.5] * len(X_test)
         
         # Comprehensive metrics
-        metrics = calculate_comprehensive_metrics(y_test, test_pred, test_proba)
+        from sklearn.metrics import (
+            accuracy_score, precision_score, recall_score, f1_score, 
+            roc_auc_score, matthews_corrcoef, log_loss
+        )
+        metrics = {}
+        try:
+            # Basic metrics
+            metrics['accuracy'] = accuracy_score(y_test, test_pred)
+            metrics['precision'] = precision_score(y_test, test_pred, zero_division=0)
+            metrics['recall'] = recall_score(y_test, test_pred, zero_division=0)
+            metrics['f1'] = f1_score(y_test, test_pred, zero_division=0)
+            
+            # ROC AUC
+            if len(np.unique(y_test)) > 1:
+                metrics['roc_auc'] = roc_auc_score(y_test, test_proba)
+            else:
+                metrics['roc_auc'] = 0.5
+            
+            # Additional metrics
+            metrics['mcc'] = matthews_corrcoef(y_test, test_pred)
+            
+            # Log loss (with clipping to avoid extreme values)
+            test_proba_clipped = np.clip(test_proba, 1e-7, 1 - 1e-7)
+            metrics['log_loss'] = log_loss(y_test, test_proba_clipped)
+            
+            # Profit-based metrics (assuming simple trading strategy)
+            returns_if_predicted_positive = y_test[test_pred == 1]
+            if len(returns_if_predicted_positive) > 0:
+                metrics['hit_rate'] = np.mean(returns_if_predicted_positive)
+                metrics['trading_accuracy'] = np.mean(returns_if_predicted_positive > 0)
+            else:
+                metrics['hit_rate'] = 0.0
+                metrics['trading_accuracy'] = 0.0
+                
+        except Exception as e:
+            logging.warning(f"Metrics calculation failed: {e}")
+            metrics = {'accuracy': 0.5, 'roc_auc': 0.5, 'f1': 0.0}
         
         # Feature importance analysis
         feature_importance = None
         if config.get('feature_importance_analysis', False):
-            feature_importance = extract_feature_importance(model, model_type, selected_features,
-                                                          X_test_scaled, y_test)
+            try:
+                if hasattr(model, 'feature_importances_'):
+                    importances = model.feature_importances_
+                    feature_importance = dict(zip(selected_features, importances))
+                elif hasattr(model, 'coef_'):
+                    importances = np.abs(model.coef_[0])
+                    feature_importance = dict(zip(selected_features, importances))
+                else:
+                    feature_importance = {}
+            except Exception as e:
+                logging.warning(f"Feature importance extraction failed: {e}")
+                feature_importance = {}
         
         # Create advanced predictor
         predictor = AdvancedStockPredictor(horizon, model_type)
@@ -551,6 +667,7 @@ def create_optimized_model(model_type: str, best_params: Dict[str, Any]):
     """Create optimized model with best parameters"""
     
     if model_type == 'xgboost':
+        from xgboost import XGBClassifier
         default_params = {
             'n_estimators': 500, 'max_depth': 6, 'learning_rate': 0.1,
             'subsample': 0.8, 'colsample_bytree': 0.8, 'random_state': 42,
@@ -594,82 +711,8 @@ def create_optimized_model(model_type: str, best_params: Dict[str, Any]):
         
     else:
         # Default to XGBoost
+        from xgboost import XGBClassifier
         return XGBClassifier(random_state=42, n_jobs=1)
-
-def calculate_comprehensive_metrics(y_true: np.ndarray, y_pred: np.ndarray, 
-                                  y_proba: np.ndarray) -> Dict[str, float]:
-    """Calculate comprehensive evaluation metrics"""
-    
-    metrics = {}
-    
-    try:
-        # Basic metrics
-        metrics['accuracy'] = accuracy_score(y_true, y_pred)
-        metrics['precision'] = precision_score(y_true, y_pred, zero_division=0)
-        metrics['recall'] = recall_score(y_true, y_pred, zero_division=0)
-        metrics['f1'] = f1_score(y_true, y_pred, zero_division=0)
-        
-        # ROC AUC
-        if len(np.unique(y_true)) > 1:
-            metrics['roc_auc'] = roc_auc_score(y_true, y_proba)
-        else:
-            metrics['roc_auc'] = 0.5
-        
-        # Additional metrics
-        from sklearn.metrics import matthews_corrcoef, log_loss
-        metrics['mcc'] = matthews_corrcoef(y_true, y_pred)
-        
-        # Log loss (with clipping to avoid extreme values)
-        y_proba_clipped = np.clip(y_proba, 1e-7, 1 - 1e-7)
-        metrics['log_loss'] = log_loss(y_true, y_proba_clipped)
-        
-        # Profit-based metrics (assuming simple trading strategy)
-        returns_if_predicted_positive = y_true[y_pred == 1]
-        if len(returns_if_predicted_positive) > 0:
-            metrics['hit_rate'] = np.mean(returns_if_predicted_positive)
-            metrics['trading_accuracy'] = np.mean(returns_if_predicted_positive > 0)
-        else:
-            metrics['hit_rate'] = 0.0
-            metrics['trading_accuracy'] = 0.0
-            
-    except Exception as e:
-        logging.warning(f"Metrics calculation failed: {e}")
-        metrics = {'accuracy': 0.5, 'roc_auc': 0.5, 'f1': 0.0}
-    
-    return metrics
-
-def extract_feature_importance(model, model_type: str, feature_names: List[str],
-                             X_test: np.ndarray, y_test: np.ndarray) -> Dict[str, float]:
-    """Extract feature importance using multiple methods"""
-    
-    importance_dict = {}
-    
-    try:
-        # Built-in feature importance
-        if hasattr(model, 'feature_importances_'):
-            built_in_importance = model.feature_importances_
-            for i, importance in enumerate(built_in_importance):
-                if i < len(feature_names):
-                    importance_dict[feature_names[i]] = float(importance)
-        
-        # Permutation importance (more reliable but slower)
-        if len(X_test) > 50 and len(feature_names) < 50:  # Only for smaller feature sets
-            try:
-                perm_importance = permutation_importance(
-                    model, X_test, y_test, n_repeats=5, random_state=42, n_jobs=1
-                )
-                for i, importance in enumerate(perm_importance.importances_mean):
-                    if i < len(feature_names):
-                        # Average built-in and permutation importance
-                        existing_importance = importance_dict.get(feature_names[i], 0)
-                        importance_dict[feature_names[i]] = (existing_importance + importance) / 2
-            except Exception as e:
-                logging.warning(f"Permutation importance failed: {e}")
-        
-    except Exception as e:
-        logging.warning(f"Feature importance extraction failed: {e}")
-    
-    return importance_dict
 
 # ==================== ENHANCED PARALLEL TRAINING ====================
 
