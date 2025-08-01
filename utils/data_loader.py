@@ -178,32 +178,7 @@ def get_updated_nifty_tickers() -> List[str]:
     current_tickers = [
         # NIFTY 50 (Updated 2024)
         "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "HINDUNILVR.NS",
-        "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS", "BHARTIARTL.NS", "LT.NS",
-        "BAJFINANCE.NS", "ASIANPAINT.NS", "HCLTECH.NS", "MARUTI.NS", "TITAN.NS",
-        "SUNPHARMA.NS", "AXISBANK.NS", "ULTRACEMCO.NS", "TATASTEEL.NS",
-        "BAJAJFINSV.NS", "NTPC.NS", "ONGC.NS", "POWERGRID.NS", "NESTLEIND.NS",
-        "ADANIPORTS.NS", "M&M.NS", "WIPRO.NS", "ITC.NS", "JSWSTEEL.NS", 
-        "INDUSINDBK.NS", "TECHM.NS", "DRREDDY.NS", "HDFCLIFE.NS", "COALINDIA.NS", 
-        "GRASIM.NS", "TATAMOTORS.NS", "BRITANNIA.NS", "CIPLA.NS", "SHREECEM.NS", 
-        "BAJAJ-AUTO.NS", "UPL.NS", "DIVISLAB.NS", "SBILIFE.NS", "EICHERMOT.NS", 
-        "HEROMOTOCO.NS", "BPCL.NS", "IOC.NS", "APOLLOHOSP.NS", "ADANIENT.NS",
-        
-        # NIFTY Next 50 (Active tickers)
-        "ABB.NS", "ACC.NS", "ADANIGREEN.NS", "AUROPHARMA.NS", "BANKBARODA.NS",
-        "BERGEPAINT.NS", "BOSCHLTD.NS", "CANBK.NS", "CHOLAFIN.NS", "COLPAL.NS",
-        "DABUR.NS", "DLF.NS", "GAIL.NS", "GODREJCP.NS", "HAVELLS.NS",
-        "HINDPETRO.NS", "ICICIGI.NS", "ICICIPRULI.NS", "INDIGO.NS", "LTIM.NS",
-        "MARICO.NS", "MUTHOOTFIN.NS", "NAUKRI.NS", "PEL.NS", "PGHH.NS",
-        "PIDILITIND.NS", "PIIND.NS", "PNB.NS", "POLYCAB.NS", "SBICARD.NS",
-        "SIEMENS.NS", "SRF.NS", "TORNTPHARM.NS", "TRENT.NS", "TVSMOTOR.NS",
-        "UBL.NS", "VBL.NS", "VEDL.NS", "GLAND.NS", "JUBLFOOD.NS",
-        
-        # Additional large caps and emerging leaders
-        "ALKEM.NS", "APLLTD.NS", "BAJAJHLDNG.NS", "BIOCON.NS", "IDFCFIRSTB.NS",
-        "NHPC.NS", "IRFC.NS", "IRCTC.NS", "BHEL.NS", "ADANIPOWER.NS",
-        "TATAPOWER.NS", "UNIONBANK.NS", "FEDERALBNK.NS", "CUB.NS", "IEX.NS",
-        "MOTHERSON.NS", "PAGEIND.NS", "PETRONET.NS", "MCDOWELL-N.NS",
-        "OFSS.NS", "PERSISTENT.NS", "MINDTREE.NS", "MPHASIS.NS", "LTTS.NS"
+        "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS", "BHARTIARTL.NS", "LT.NS"
     ]
     
     # Remove known delisted/problematic tickers
