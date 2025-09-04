@@ -1,49 +1,50 @@
-# utils/data_loader_enhanced.py
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Tuple
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import logging
 from datetime import datetime, timedelta
 import os
-import pickle
+import sqlite3
+from pathlib import Path
 import hashlib
 from tqdm import tqdm
 import warnings
-import sqlite3
-from pathlib import Path
+import json
+import sys
+from config import secrets
 
 warnings.filterwarnings('ignore')
+logging.basicConfig(level=logging.INFO)
 
 # ==================== ENHANCED CONFIGURATION ====================
-
 DATA_CONFIG = {
-    'default_period': '10y',  # Extended to 10 years for more data
-    'max_period': '20y',      # Maximum available period
+    'default_period': '10y',
+    'max_period': '20y',
     'default_interval': '1d',
-    'max_workers': 6,         # Reduced to avoid rate limiting
-    'retry_attempts': 5,      # Increased retry attempts
-    'retry_delay': 2,         # Increased delay
+    'max_workers': 6,
+    'retry_attempts': 5,
+    'retry_delay': 2,
     'cache_enabled': True,
     'cache_duration_hours': 12,
-    'batch_size': 8,          # Reduced batch size
-    'request_delay': 0.5,     # Increased delay between requests
-    'timeout': 45,            # Increased timeout
+    'batch_size': 8,
+    'request_delay': 0.5,
+    'timeout': 45,
     'validate_data': True,
-    'use_database': True,     # New: Use SQLite database for persistence
-    'fallback_tickers': True, # Use fallback ticker list
-    'data_quality_threshold': 0.7  # Minimum data quality required
+    'use_database': True,
+    'fallback_tickers': True,
+    'data_quality_threshold': 0.7,
+    'realtime_refresh_minutes': 5
 }
 
 # ==================== DATABASE STORAGE ====================
-
 class StockDataDatabase:
     """SQLite database for persistent stock data storage"""
     
-    def __init__(self, db_path: str = "stock_data.db"):
+    def __init__(self, db_path: str = "data/stock_data.db"):
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.db_path = db_path
         self.init_database()
     
@@ -113,7 +114,7 @@ class StockDataDatabase:
             """, (
                 ticker,
                 datetime.now().isoformat(),
-                1.0,  # Calculate actual data quality
+                1.0,
                 len(df_copy),
                 df_copy['date'].min(),
                 df_copy['date'].max()
@@ -167,66 +168,155 @@ class StockDataDatabase:
             return dict(zip(columns, row))
         return None
 
-# ==================== ENHANCED TICKER MANAGEMENT ====================
-
-def get_updated_nifty_tickers() -> List[str]:
-    """
-    Get most current NIFTY tickers with automatic updates and fallbacks
-    """
+# ==================== REAL-TIME DATA INTEGRATION ====================
+class RealTimeDataManager:
+    """Manager for real-time data updates"""
+    def __init__(self, db_path: str = "data/realtime_data.db"):
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self.db_path = db_path
+        self.init_database()
     
-    # Most current NIFTY 50 + NIFTY Next 50 + additional large caps
+    def init_database(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS realtime_data (
+                    ticker TEXT,
+                    timestamp DATETIME,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume INTEGER,
+                    PRIMARY KEY (ticker, timestamp)
+                )
+            """)
+    
+    def update_realtime_data(self, tickers: list):
+        """Fetch and store real-time data"""
+        for ticker in tqdm(tickers, desc="Updating real-time data"):
+            try:
+                stock = yf.Ticker(ticker)
+                data = stock.history(period='1d', interval='1m')
+                
+                if not data.empty:
+                    data = data.reset_index()
+                    data['ticker'] = ticker
+                    data.rename(columns={'Datetime': 'timestamp'}, inplace=True)
+                    
+                    with sqlite3.connect(self.db_path) as conn:
+                        data[['ticker', 'timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']].to_sql(
+                            'realtime_data', conn, if_exists='append', index=False
+                        )
+            except Exception as e:
+                logging.error(f"Real-time update failed for {ticker}: {e}")
+    
+    def get_latest_data(self, ticker: str, lookback_minutes=60):
+        """Get latest real-time data"""
+        query = f"""
+            SELECT * FROM realtime_data 
+            WHERE ticker = ? 
+            AND timestamp >= datetime('now', '-{lookback_minutes} minutes')
+            ORDER BY timestamp DESC
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            df = pd.read_sql(query, conn, params=(ticker,))
+        
+        if not df.empty:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.set_index('timestamp')
+        return df
+
+# ==================== ALTERNATIVE DATA SOURCES ====================
+class NewsSentimentLoader:
+    """Fetch and process news sentiment data"""
+    def __init__(self, api_key: str = secrets.NEWS_API_KEY):
+        self.api_key = api_key
+        self.base_url = "https://newsapi.org/v2/everything"
+    
+    def fetch_news(self, query: str, days=7):
+        """Fetch news articles for a query"""
+        params = {
+            'q': query,
+            'apiKey': self.api_key,
+            'language': 'en',
+            'sortBy': 'publishedAt',
+            'from': (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d'),
+            'pageSize': 50
+        }
+        
+        try:
+            response = requests.get(self.base_url, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            return data.get('articles', [])
+        except Exception as e:
+            logging.error(f"News API error: {e}")
+            return []
+    
+    def analyze_sentiment(self, text: str):
+        """Simple sentiment analysis"""
+        positive_words = ['bullish', 'growth', 'strong', 'buy', 'outperform', 'positive']
+        negative_words = ['bearish', 'decline', 'weak', 'sell', 'underperform', 'negative']
+        
+        if any(word in text.lower() for word in positive_words):
+            return 1
+        elif any(word in text.lower() for word in negative_words):
+            return -1
+        return 0
+    
+    def get_sentiment_scores(self, ticker: str):
+        """Get sentiment scores for a ticker"""
+        articles = self.fetch_news(ticker)
+        if not articles:
+            return 0
+        
+        scores = []
+        for article in articles:
+            content = f"{article['title']} {article['description']}"
+            scores.append(self.analyze_sentiment(content))
+        
+        return np.mean(scores) if scores else 0
+
+# ==================== ENHANCED TICKER MANAGEMENT ====================
+def get_updated_nifty_tickers() -> List[str]:
+    """Get most current NIFTY tickers with automatic updates"""
     current_tickers = [
-        # NIFTY 50 (Updated 2024)
         "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "HINDUNILVR.NS",
-        "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS", "BHARTIARTL.NS", "LT.NS"
+        "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS", "BHARTIARTL.NS", "LT.NS",
+        "HDFC.NS", "ITC.NS", "ASIANPAINT.NS", "MARUTI.NS", "AXISBANK.NS",
+        "BAJFINANCE.NS", "WIPRO.NS", "ONGC.NS", "SUNPHARMA.NS", "NESTLEIND.NS"
     ]
     
-    # Remove known delisted/problematic tickers
-    delisted_tickers = {
-        "HDFC.NS",        # Merged with HDFCBANK
-        "ADANITRANS.NS",  # Delisted
-        "LTI.NS",         # Merged with LTIM
-        "ZOMATO.NS"       # May have listing issues
-    }
-    
-    # Filter out problematic tickers
+    delisted_tickers = {"ADANITRANS.NS", "LTI.NS", "ZOMATO.NS"}
     active_tickers = [ticker for ticker in current_tickers if ticker not in delisted_tickers]
     
     return active_tickers
 
 def validate_and_filter_tickers(tickers: List[str]) -> List[str]:
-    """
-    Validate tickers and filter out invalid ones
-    """
+    """Validate tickers and filter out invalid ones"""
     valid_tickers = []
     
     for ticker in tickers:
-        # Basic format validation
         if not ticker or not isinstance(ticker, str):
             continue
             
         ticker = ticker.upper().strip()
         
-        # Add .NS suffix if missing
         if not ticker.endswith('.NS') and not ticker.endswith('.BO'):
             ticker += '.NS'
-        
-        # Skip if contains invalid characters
+            
         if any(char in ticker for char in ['/', '\\', '|', '<', '>', '"']):
             continue
             
         valid_tickers.append(ticker)
     
-    return list(set(valid_tickers))  # Remove duplicates
+    return list(set(valid_tickers))
 
 # ==================== ENHANCED DATA FETCHING ====================
-
 def fetch_extended_historical_data(ticker: str, 
                                  max_period: str = "20y",
                                  fallback_periods: List[str] = None) -> pd.DataFrame:
-    """
-    Fetch maximum available historical data with fallback periods
-    """
+    """Fetch maximum available historical data with fallback periods"""
     if fallback_periods is None:
         fallback_periods = ["20y", "15y", "10y", "5y", "2y", "1y"]
     
@@ -235,7 +325,7 @@ def fetch_extended_historical_data(ticker: str,
             stock = yf.Ticker(ticker)
             df = stock.history(period=period, timeout=60)
             
-            if not df.empty and len(df) > 100:  # Minimum 100 data points
+            if not df.empty and len(df) > 100:
                 logging.info(f"Successfully fetched {len(df)} records for {ticker} ({period})")
                 return df
             elif not df.empty:
@@ -248,7 +338,7 @@ def fetch_extended_historical_data(ticker: str,
     # Last resort: try with specific date range
     try:
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=365*20)  # 20 years back
+        start_date = end_date - timedelta(days=365*20)
         
         stock = yf.Ticker(ticker)
         df = stock.history(start=start_date.strftime('%Y-%m-%d'), 
@@ -264,9 +354,7 @@ def fetch_extended_historical_data(ticker: str,
     return pd.DataFrame()
 
 def fetch_single_ticker_enhanced(args: Tuple) -> Tuple[str, pd.DataFrame]:
-    """
-    Enhanced single ticker fetching with database integration
-    """
+    """Enhanced single ticker fetching with database integration"""
     ticker, config, database = args
     
     try:
@@ -310,9 +398,7 @@ def fetch_single_ticker_enhanced(args: Tuple) -> Tuple[str, pd.DataFrame]:
 
 def fetch_historical_data_enhanced(tickers: List[str], 
                                  config: Dict = None) -> Dict[str, pd.DataFrame]:
-    """
-    Enhanced historical data fetching with database integration
-    """
+    """Enhanced historical data fetching with database integration"""
     config = config or DATA_CONFIG
     
     # Initialize database
@@ -371,11 +457,8 @@ def fetch_historical_data_enhanced(tickers: List[str],
     return results
 
 # ==================== ENHANCED DATA VALIDATION ====================
-
 def validate_stock_data_enhanced(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
-    """
-    Enhanced data validation with comprehensive checks
-    """
+    """Enhanced data validation with comprehensive checks"""
     if df.empty:
         return df
     
@@ -432,7 +515,7 @@ def validate_stock_data_enhanced(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
                 logging.info(f"Extreme moves detected for {ticker}: {len(extreme_dates)} days")
                 
                 # Only remove if too many extreme moves (likely data error)
-                if extreme_moves.sum() > len(df) * 0.05:  # More than 5% extreme moves
+                if extreme_moves.sum() > len(df) * 0.05:
                     df = df[~extreme_moves]
                     logging.warning(f"Removed excessive extreme moves for {ticker}")
         
@@ -468,11 +551,8 @@ def validate_stock_data_enhanced(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
     return df
 
 # ==================== DATA QUALITY REPORTING ====================
-
 def generate_data_quality_report(data_dict: Dict[str, pd.DataFrame]):
-    """
-    Generate comprehensive data quality report
-    """
+    """Generate comprehensive data quality report"""
     report = {
         'total_tickers': len(data_dict),
         'successful_tickers': len([k for k, v in data_dict.items() if not v.empty]),
@@ -529,13 +609,10 @@ def generate_data_quality_report(data_dict: Dict[str, pd.DataFrame]):
         print("="*60)
 
 # ==================== MAIN INTERFACE ====================
-
 def get_comprehensive_stock_data(tickers: Optional[List[str]] = None,
                                config: Dict = None,
                                max_tickers: int = None) -> Dict[str, pd.DataFrame]:
-    """
-    Main interface for comprehensive stock data collection
-    """
+    """Main interface for comprehensive stock data collection"""
     config = config or DATA_CONFIG
     
     # Get tickers
@@ -554,36 +631,3 @@ def get_comprehensive_stock_data(tickers: Optional[List[str]] = None,
     data = fetch_historical_data_enhanced(tickers, config)
     
     return data
-
-# ==================== EXAMPLE USAGE ====================
-
-if __name__ == "__main__":
-    print("Enhanced Stock Data Collection System")
-    print("="*60)
-    
-    # Enhanced configuration
-    enhanced_config = DATA_CONFIG.copy()
-    enhanced_config['max_period'] = '20y'
-    enhanced_config['use_database'] = True
-    
-    print("Enhanced Configuration:")
-    for key, value in enhanced_config.items():
-        print(f"  {key}: {value}")
-    
-    # Test with limited tickers
-    test_tickers = ['RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS']
-    
-    print(f"\nTesting enhanced system with {len(test_tickers)} tickers")
-    
-    # This would run the enhanced data collection
-    # data = get_comprehensive_stock_data(test_tickers, enhanced_config)
-    
-    print("\nEnhancements implemented:")
-    print("  ✓ Extended historical data (up to 20 years)")
-    print("  ✓ SQLite database integration")
-    print("  ✓ Enhanced error handling and retry logic")
-    print("  ✓ Updated ticker lists (removed delisted)")
-    print("  ✓ Comprehensive data validation")
-    print("  ✓ Data quality reporting")
-    print("  ✓ Progressive fallback periods")
-    print("  ✓ Intelligent caching system")

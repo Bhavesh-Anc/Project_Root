@@ -1,4 +1,3 @@
-# utils/model.py
 import pickle
 import hashlib
 from datetime import datetime, timedelta
@@ -29,133 +28,200 @@ from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
 from typing import Dict, List, Tuple, Any, Optional
+import sqlite3
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score, 
+    roc_auc_score, matthews_corrcoef, log_loss
+)
+from utils.data_loader_enhanced import RealTimeDataManager
+from utils.news_sentiment import AdvancedSentimentAnalyzer
+from config import secrets
 
 warnings.filterwarnings('ignore')
+logging.basicConfig(level=logging.INFO)
 
 # ==================== ENHANCED CONFIGURATION ====================
-
 ENHANCED_MODEL_CONFIG = {
     'n_jobs': -1,
     'random_state': 42,
-    'cv_folds': 5,  # Increased for better validation
+    'cv_folds': 5,
     'test_size': 0.2,
-    'validation_size': 0.1,  # Additional validation set
+    'validation_size': 0.1,
     'model_types': ['xgboost', 'lightgbm', 'catboost', 'random_forest', 'neural_network'],
     'ensemble_methods': ['voting', 'stacking', 'blending'],
-    'fast_mode': False,  # Disabled for better performance
+    'fast_mode': False,
     'incremental_training': True,
-    'feature_selection_top_k': 100,  # Increased feature count
+    'feature_selection_top_k': 100,
     'early_stopping': True,
     'hyperparameter_tuning': True,
     'model_calibration': True,
     'feature_importance_analysis': True,
-    
-    # Enhanced hyperparameter spaces
-    'param_space': {
-        'xgboost': {
-            'n_estimators': [200, 500, 800],
-            'max_depth': [4, 6, 8, 10],
-            'learning_rate': [0.01, 0.05, 0.1, 0.2],
-            'subsample': [0.7, 0.8, 0.9],
-            'colsample_bytree': [0.7, 0.8, 0.9],
-            'reg_alpha': [0, 0.1, 0.5],
-            'reg_lambda': [0, 0.1, 0.5],
-            'early_stopping_rounds': 50
-        },
-        'lightgbm': {
-            'n_estimators': [200, 500, 800],
-            'max_depth': [4, 6, 8, 10],
-            'learning_rate': [0.01, 0.05, 0.1, 0.2],
-            'subsample': [0.7, 0.8, 0.9],
-            'colsample_bytree': [0.7, 0.8, 0.9],
-            'reg_alpha': [0, 0.1, 0.5],
-            'reg_lambda': [0, 0.1, 0.5],
-            'num_leaves': [15, 31, 63],
-            'min_child_samples': [10, 20, 30]
-        },
-        'catboost': {
-            'n_estimators': [200, 500, 800],
-            'max_depth': [4, 6, 8, 10],
-            'learning_rate': [0.01, 0.05, 0.1, 0.2],
-            'l2_leaf_reg': [1, 3, 5, 7],
-            'border_count': [32, 64, 128],
-            'bagging_temperature': [0, 0.5, 1.0]
-        },
-        'random_forest': {
-            'n_estimators': [200, 500, 800],
-            'max_depth': [10, 15, 20, None],
-            'min_samples_split': [2, 5, 10],
-            'min_samples_leaf': [1, 2, 4],
-            'class_weight': ['balanced', 'balanced_subsample'],
-            'max_features': ['sqrt', 'log2', 0.8]
-        },
-        'neural_network': {
-            'hidden_layer_sizes': [(50,), (100,), (50, 25), (100, 50), (100, 50, 25)],
-            'activation': ['relu', 'tanh'],
-            'alpha': [0.0001, 0.001, 0.01],
-            'learning_rate': ['constant', 'adaptive'],
-            'max_iter': [500, 1000]
-        }
-    },
-    
-    'priority_horizons': ['next_week', 'next_month', 'next_quarter', 'next_year'],
     'cache_dir': 'model_cache_enhanced',
     'parallel_training': True,
-    'batch_size': 8,  # Reduced for memory efficiency
+    'batch_size': 8,
     'early_stopping_patience': 10,
     'model_selection_metric': 'roc_auc',
-    'ensemble_size': 5  # Number of models in ensemble
+    'ensemble_size': 5,
+    'realtime_integration': True,
+    'sentiment_integration': True
 }
 
-# ==================== MODEL SAVING/LOADING ====================
-
-def save_models_optimized(models: Dict[str, Any], cache_dir: str = None):
-    """Save models to cache directory"""
-    cache_dir = cache_dir or ENHANCED_MODEL_CONFIG.get('cache_dir', 'model_cache_enhanced')
-    os.makedirs(cache_dir, exist_ok=True)
+# ==================== REAL-TIME INTEGRATION ====================
+class RealTimeIntegration:
+    """Integrate real-time data into models"""
+    def __init__(self):
+        self.realtime_manager = RealTimeDataManager()
+        self.sentiment_analyzer = AdvancedSentimentAnalyzer(api_key=secrets.NEWS_API_KEY)
     
-    for ticker, model_dict in models.items():
-        for model_key, predictor in model_dict.items():
-            # Create a unique filename for each model
-            filename = f"{ticker}_{model_key}.pkl"
-            filepath = os.path.join(cache_dir, filename)
-            with open(filepath, 'wb') as f:
-                pickle.dump(predictor, f, protocol=pickle.HIGHEST_PROTOCOL)
-                
-    logging.info(f"Saved {len(models)} tickers' models to {cache_dir}")
-
-def load_models_optimized(cache_dir: str = None) -> Dict[str, Any]:
-    """Load models from cache directory"""
-    cache_dir = cache_dir or ENHANCED_MODEL_CONFIG.get('cache_dir', 'model_cache_enhanced')
-    models = {}
-    
-    if not os.path.exists(cache_dir):
-        return models
+    def enhance_features(self, df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+        """Enhance features with real-time data and sentiment"""
+        enhanced_df = df.copy()
         
-    for filename in os.listdir(cache_dir):
-        if filename.endswith('.pkl'):
-            filepath = os.path.join(cache_dir, filename)
-            try:
-                # Extract ticker and model_key from filename
-                ticker, model_key = filename[:-4].split('_', 1)
+        # Add real-time features if available
+        realtime_data = self.realtime_manager.get_latest_data(ticker, lookback_minutes=240)
+        if not realtime_data.empty:
+            # Calculate technical indicators on real-time data
+            enhanced_df['realtime_rsi'] = self.calculate_rsi(realtime_data['Close'], 14)
+            enhanced_df['realtime_macd'] = self.calculate_macd(realtime_data['Close'])
+            
+            # Add volume features
+            enhanced_df['realtime_volume_ratio'] = realtime_data['Volume'] / realtime_data['Volume'].rolling(20).mean()
+        
+        # Add sentiment features
+        sentiment_score = self.sentiment_analyzer.get_ticker_sentiment(ticker)
+        enhanced_df['sentiment_score'] = sentiment_score
+        
+        return enhanced_df
+    
+    def calculate_rsi(self, series: pd.Series, window: int = 14) -> pd.Series:
+        """Calculate RSI for real-time data"""
+        delta = series.diff()
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        
+        avg_gain = gain.ewm(span=window).mean()
+        avg_loss = loss.ewm(span=window).mean()
+        
+        rs = avg_gain / (avg_loss + 1e-10)
+        return 100 - (100 / (1 + rs))
+    
+    def calculate_macd(self, series: pd.Series, fast=12, slow=26, signal=9) -> pd.Series:
+        """Calculate MACD for real-time data"""
+        ema_fast = series.ewm(span=fast).mean()
+        ema_slow = series.ewm(span=slow).mean()
+        macd_line = ema_fast - ema_slow
+        return macd_line
+
+# ==================== MODEL MONITORING ====================
+class ModelMonitor:
+    """Monitor model performance and data drift"""
+    def __init__(self, db_path: str = "data/model_monitor.db"):
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self.db_path = db_path
+        self.init_db()
+    
+    def init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS model_performance (
+                    model_id TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    metric_name TEXT,
+                    metric_value REAL,
+                    PRIMARY KEY (model_id, timestamp, metric_name)
+                )
+            """)
+            
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS feature_drift (
+                    model_id TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    feature_name TEXT,
+                    drift_score REAL,
+                    PRIMARY KEY (model_id, timestamp, feature_name)
+                )
+            """)
+    
+    def log_performance(self, model_id: str, metrics: dict):
+        """Log model performance metrics"""
+        with sqlite3.connect(self.db_path) as conn:
+            for metric, value in metrics.items():
+                conn.execute("""
+                    INSERT INTO model_performance (model_id, metric_name, metric_value)
+                    VALUES (?, ?, ?)
+                """, (model_id, metric, value))
+    
+    def log_feature_drift(self, model_id: str, feature_name: str, drift_score: float):
+        """Log feature drift detection"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT INTO feature_drift (model_id, feature_name, drift_score)
+                VALUES (?, ?, ?)
+            """, (model_id, feature_name, drift_score))
+    
+    def get_performance_history(self, model_id: str, metric_name: str, days=30):
+        """Get historical performance data"""
+        with sqlite3.connect(self.db_path) as conn:
+            df = pd.read_sql("""
+                SELECT timestamp, metric_value FROM model_performance
+                WHERE model_id = ? AND metric_name = ?
+                AND timestamp >= datetime('now', ?)
+                ORDER BY timestamp
+            """, conn, params=(model_id, metric_name, f"-{days} days"))
+        
+        if not df.empty:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.set_index('timestamp')
+        return df
+
+# ==================== WALK-FORWARD VALIDATION ====================
+class WalkForwardValidator:
+    """Enhanced walk-forward validation for time series"""
+    def __init__(self, initial_train_size=0.7, step_size=0.05, metric='roc_auc'):
+        self.initial_train_size = initial_train_size
+        self.step_size = step_size
+        self.metric = metric
+        self.results = []
+    
+    def validate(self, model, X, y):
+        """Perform walk-forward validation"""
+        n = len(X)
+        train_size = int(n * self.initial_train_size)
+        step = int(n * self.step_size)
+        
+        scores = []
+        while train_size + step < n:
+            # Split data
+            X_train, X_test = X[:train_size], X[train_size:train_size+step]
+            y_train, y_test = y[:train_size], y[train_size:train_size+step]
+            
+            # Train and evaluate
+            model.fit(X_train, y_train)
+            if hasattr(model, 'predict_proba'):
+                preds = model.predict_proba(X_test)[:, 1]
+            else:
+                preds = model.predict(X_test)
+            
+            if self.metric == 'roc_auc':
+                if len(np.unique(y_test)) > 1:
+                    score = roc_auc_score(y_test, preds)
+                else:
+                    score = 0.5
+            elif self.metric == 'accuracy':
+                score = accuracy_score(y_test, preds)
+            elif self.metric == 'f1':
+                score = f1_score(y_test, preds)
+            else:
+                score = 0.5
                 
-                with open(filepath, 'rb') as f:
-                    predictor = pickle.load(f)
-                    
-                if ticker not in models:
-                    models[ticker] = {}
-                models[ticker][model_key] = predictor
-                
-            except Exception as e:
-                logging.warning(f"Failed to load model {filename}: {e}")
-                
-    logging.info(f"Loaded {len(models)} tickers' models from {cache_dir}")
-    return models
+            scores.append(score)
+            train_size += step
+        
+        return np.mean(scores) if scores else 0.5
 
 # ==================== ENHANCED MODEL CLASSES ====================
-
 class AdvancedStockPredictor:
-    """Enhanced predictor class with advanced capabilities"""
+    """Enhanced predictor class with monitoring and real-time capabilities"""
     
     def __init__(self, horizon: str, model_type: str):
         self.horizon = horizon
@@ -172,6 +238,8 @@ class AdvancedStockPredictor:
         self.validation_score = None
         self.hyperparameters = None
         self.training_time = None
+        self.monitor = ModelMonitor()
+        self.realtime_integrator = RealTimeIntegration()
         
     def preprocess_features(self, X: pd.DataFrame, fit: bool = False) -> np.ndarray:
         """Preprocess features with scaling and selection"""
@@ -205,22 +273,40 @@ class AdvancedStockPredictor:
                 
             return X_scaled
     
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
-        """Make predictions with preprocessing"""
+    def predict(self, X: pd.DataFrame, ticker: str = None) -> np.ndarray:
+        """Make predictions with preprocessing and real-time enhancement"""
         if self.model is None:
             return np.array([0] * len(X))
         
-        X_processed = self.preprocess_features(X, fit=False)
+        # Enhance features with real-time data
+        if ticker and ENHANCED_MODEL_CONFIG.get('realtime_integration', True):
+            try:
+                X_enhanced = self.realtime_integrator.enhance_features(X, ticker)
+            except:
+                X_enhanced = X
+        else:
+            X_enhanced = X
+        
+        X_processed = self.preprocess_features(X_enhanced, fit=False)
         predictions = self.model.predict(X_processed)
         
         return predictions
     
-    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+    def predict_proba(self, X: pd.DataFrame, ticker: str = None) -> np.ndarray:
         """Make probability predictions with preprocessing"""
         if self.model is None or not hasattr(self.model, 'predict_proba'):
             return np.array([[0.5, 0.5]] * len(X))
         
-        X_processed = self.preprocess_features(X, fit=False)
+        # Enhance features with real-time data
+        if ticker and ENHANCED_MODEL_CONFIG.get('realtime_integration', True):
+            try:
+                X_enhanced = self.realtime_integrator.enhance_features(X, ticker)
+            except:
+                X_enhanced = X
+        else:
+            X_enhanced = X
+        
+        X_processed = self.preprocess_features(X_enhanced, fit=False)
         
         if self.calibrator:
             probabilities = self.calibrator.predict_proba(X_processed)
@@ -235,7 +321,31 @@ class AdvancedStockPredictor:
             return {}
         
         return dict(zip(self.selected_features, self.feature_importances))
+    
+    def log_performance(self, X_test: pd.DataFrame, y_test: pd.Series, ticker: str):
+        """Log model performance for monitoring"""
+        if self.model is None:
+            return
+        
+        # Predict probabilities
+        proba = self.predict_proba(X_test, ticker)[:, 1]
+        preds = (proba > 0.5).astype(int)
+        
+        # Calculate metrics
+        metrics = {
+            'accuracy': accuracy_score(y_test, preds),
+            'precision': precision_score(y_test, preds, zero_division=0),
+            'recall': recall_score(y_test, preds, zero_division=0),
+            'f1': f1_score(y_test, preds, zero_division=0),
+            'roc_auc': roc_auc_score(y_test, proba) if len(np.unique(y_test)) > 1 else 0.5,
+            'log_loss': log_loss(y_test, proba)
+        }
+        
+        # Log to monitoring system
+        model_id = f"{ticker}_{self.model_type}_{self.horizon}"
+        self.monitor.log_performance(model_id, metrics)
 
+# ... rest of model_enhanced.py code remains the same ...
 class IntelligentFeatureSelector:
     """Advanced feature selection with multiple methods"""
     
