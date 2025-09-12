@@ -1,3 +1,4 @@
+# config.py
 """Configuration file for AI Stock Advisor Pro"""
 
 import os
@@ -35,50 +36,6 @@ MODEL_CONFIG = {
     'max_models_per_ticker': 3,
     'early_stopping_patience': 10,
     'hyperparameter_trials': 50
-}
-
-# Data configuration
-DATA_CONFIG = {
-    'default_period': '20y',
-    'max_period': '25y',
-    'intervals': ['1d', '1wk', '1mo'],
-    'default_interval': '1d',
-    'max_workers': 8,
-    'retry_attempts': 7,
-    'retry_delay': 2,
-    'exponential_backoff': True,
-    'cache_enabled': True,
-    'cache_duration_hours': 24,
-    'batch_size': 12,
-    'request_delay': 0.3,
-    'timeout': 90,
-    'validate_data': True,
-    'use_database': True,
-    'use_async': True,
-    'fallback_tickers': True,
-    'data_quality_threshold': 0.75
-}
-
-# Feature engineering configuration 
-FEATURE_CONFIG = {
-    'lookback_periods': [5, 10, 20, 50],
-    'technical_indicators': [
-        'sma', 'ema', 'rsi', 'macd', 'bollinger', 
-        'stochastic', 'atr', 'cci', 'williams_r', 'obv'
-    ],
-    'price_features': True,
-    'volume_features': True,
-    'volatility_features': True,
-    'momentum_features': True,
-    'trend_features': True,
-    'pattern_features': True,
-    'market_microstructure': True,
-    'sentiment_features': True,
-    'target_horizons': ['next_week', 'next_month', 'next_quarter', 'next_year'],
-    'feature_selection_enabled': True,
-    'parallel_processing': True,
-    'cache_features': True,
-    'advanced_features': True
 }
 
 # Application configuration

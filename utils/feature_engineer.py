@@ -879,7 +879,7 @@ def create_features_parallel_safe(data_dict: Dict[str, pd.DataFrame],
 
 # ==================== MAIN INTERFACE FUNCTIONS ====================
 
-def engineer_features(data_dict: Dict[str, pd.DataFrame],
+def engineer_features_enhanced(data_dict: Dict[str, pd.DataFrame],
                              config: Dict = None,
                              use_cache: bool = True,
                              parallel: bool = True) -> Dict[str, pd.DataFrame]:
@@ -962,12 +962,12 @@ if __name__ == "__main__":
         print(f"  {key}: {value}")
     
     print(f"\nNew features added:")
-    print(f"  ✓ Advanced price features (gaps, spreads, crossovers)")
-    print(f"  ✓ Enhanced volume features (OBV, VWAP, accumulation)")
-    print(f"  ✓ Candlestick patterns (doji, hammer, engulfing)")
-    print(f"  ✓ Market sentiment indicators")
-    print(f"  ✓ Market microstructure features")
-    print(f"  ✓ Multi-timeframe analysis")
-    print(f"  ✓ Fixed caching system (no Series hash error)")
-    print(f"  ✓ Enhanced error handling and logging")
-    print(f"  ✓ Comprehensive data cleaning")
+    print(f"  âœ“ Advanced price features (gaps, spreads, crossovers)")
+    print(f"  âœ“ Enhanced volume features (OBV, VWAP, accumulation)")
+    print(f"  âœ“ Candlestick patterns (doji, hammer, engulfing)")
+    print(f"  âœ“ Market sentiment indicators")
+    print(f"  âœ“ Market microstructure features")
+    print(f"  âœ“ Multi-timeframe analysis")
+    print(f"  âœ“ Fixed caching system (no Series hash error)")
+    print(f"  âœ“ Enhanced error handling and logging")
+    print(f"  âœ“ Comprehensive data cleaning")
