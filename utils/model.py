@@ -33,8 +33,7 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, 
     roc_auc_score, matthews_corrcoef, log_loss
 )
-from utils.data_loader_enhanced import RealTimeDataManager
-from utils.news_sentiment import AdvancedSentimentAnalyzer
+from utils.data_loader import RealTimeDataManager
 from config import secrets
 
 warnings.filterwarnings('ignore')
