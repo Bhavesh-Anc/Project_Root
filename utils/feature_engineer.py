@@ -879,7 +879,7 @@ def create_features_parallel_safe(data_dict: Dict[str, pd.DataFrame],
 
 # ==================== MAIN INTERFACE FUNCTIONS ====================
 
-def engineer_features_enhanced(data_dict: Dict[str, pd.DataFrame],
+def engineer_features(data_dict: Dict[str, pd.DataFrame],
                              config: Dict = None,
                              use_cache: bool = True,
                              parallel: bool = True) -> Dict[str, pd.DataFrame]:

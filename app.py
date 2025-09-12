@@ -15,7 +15,7 @@ import asyncio
 
 # Import enhanced modules
 from utils.data_loader import get_comprehensive_stock_data, DATA_CONFIG
-from utils.feature_engineer import engineer_features_enhanced, FEATURE_CONFIG
+from utils.feature_engineer import engineer_features, FEATURE_CONFIG
 from utils.model import (
     train_models_enhanced_parallel, 
     predict_with_ensemble,
@@ -125,7 +125,7 @@ def load_comprehensive_data(max_tickers: int = None):
     enhanced_feature_config['cache_features'] = True
     
     with st.spinner("🔧 Engineering advanced features..."):
-        featured_data = engineer_features_enhanced(
+        featured_data = engineer_features(
             raw_data, 
             config=enhanced_feature_config,
             use_cache=True,

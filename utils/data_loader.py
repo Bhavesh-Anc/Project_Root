@@ -14,7 +14,7 @@ from tqdm import tqdm
 import warnings
 import json
 import sys
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Any, Optional
 import asyncio
 import aiohttp
 from dataclasses import dataclass
@@ -41,7 +41,7 @@ class DataSourceConfig:
         if self.fallback_sources is None:
             self.fallback_sources = ["alpha_vantage", "financial_modeling_prep", "polygon"]
 
-COMPREHENSIVE_DATA_CONFIG = {
+DATA_CONFIG = {
     'default_period': '20y',
     'max_period': '25y',
     'intervals': ['1d', '1wk', '1mo'],
@@ -1434,7 +1434,7 @@ def get_comprehensive_stock_data_enhanced(
     """
     Main interface for comprehensive stock data collection with advanced features
     """
-    config = config or COMPREHENSIVE_DATA_CONFIG
+    config = config or DATA_CONFIG
     
     # Initialize components
     database = AdvancedStockDatabase()
@@ -1778,7 +1778,7 @@ def validate_stock_data_comprehensive(df: pd.DataFrame, ticker: str) -> pd.DataF
         logging.info(f"Data quality for {ticker}: {final_quality:.3f} ({original_length} -> {len(df)} rows)")
         
         # Return data only if quality is acceptable
-        if final_quality >= COMPREHENSIVE_DATA_CONFIG.get('data_quality_threshold', 0.75):
+        if final_quality >= DATA_CONFIG.get('data_quality_threshold', 0.75):
             return df
         else:
             logging.warning(f"Data quality too low for {ticker}: {final_quality:.3f}")
@@ -2180,5 +2180,5 @@ __all__ = [
     'validate_stock_data_comprehensive',
     'generate_comprehensive_data_quality_report',
     'AdvancedDataCache',
-    'COMPREHENSIVE_DATA_CONFIG'
+    'DATA_CONFIG'
 ]
