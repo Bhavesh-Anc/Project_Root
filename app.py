@@ -1,4 +1,4 @@
-# app_enhanced.py
+# app_complete.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -13,16 +13,30 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 
-# Import enhanced modules
-from utils.data_loader import get_comprehensive_stock_data, DATA_CONFIG
-from utils.feature_engineer import engineer_features_enhanced, FEATURE_CONFIG
-from utils.model import (
-    train_models_enhanced_parallel, 
-    predict_with_ensemble,
-    ENHANCED_MODEL_CONFIG,
-    save_models_optimized,
-    load_models_optimized
-)
+# Import enhanced modules with error handling
+try:
+    from utils.data_loader import get_comprehensive_stock_data, DATA_CONFIG
+except ImportError as e:
+    st.error(f"Data loader import failed: {e}")
+    st.stop()
+
+try:
+    from utils.feature_engineer import engineer_features_enhanced, FEATURE_CONFIG
+except ImportError as e:
+    st.error(f"Feature engineer import failed: {e}")
+    st.stop()
+
+try:
+    from utils.model import (
+        train_models_enhanced_parallel, 
+        predict_with_ensemble,
+        ENHANCED_MODEL_CONFIG,
+        save_models_optimized,
+        load_models_optimized
+    )
+except ImportError as e:
+    st.error(f"Model import failed: {e}")
+    st.stop()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -31,7 +45,7 @@ warnings.filterwarnings('ignore')
 # Enhanced Streamlit page configuration
 st.set_page_config(
     page_title="AI Stock Advisor Pro - Enhanced",
-    page_icon="ðŸš€",
+    page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -98,25 +112,29 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Enhanced caching system
-@st.cache_data(ttl=1800, max_entries=3, show_spinner="ðŸ”„ Loading cached data...")
+@st.cache_data(ttl=1800, max_entries=3, show_spinner="Loading cached data...")
 def load_comprehensive_data(max_tickers: int = None):
     """Load comprehensive stock data with enhanced features"""
     
     # Enhanced configuration
     enhanced_data_config = DATA_CONFIG.copy()
-    enhanced_data_config['max_period'] = '15y'  # 15 years of data
+    enhanced_data_config['max_period'] = '15y'
     enhanced_data_config['use_database'] = True
     enhanced_data_config['validate_data'] = True
     
-    with st.spinner("ðŸ” Fetching comprehensive stock data..."):
-        raw_data = get_comprehensive_stock_data(
-            tickers=None, 
-            config=enhanced_data_config, 
-            max_tickers=max_tickers
-        )
+    with st.spinner("Fetching comprehensive stock data..."):
+        try:
+            raw_data = get_comprehensive_stock_data(
+                tickers=None, 
+                config=enhanced_data_config, 
+                max_tickers=max_tickers
+            )
+        except Exception as e:
+            st.error(f"Failed to fetch stock data: {e}")
+            return {}, {}
     
     if not raw_data:
-        st.error("âŒ Failed to fetch stock data")
+        st.error("Failed to fetch stock data")
         return {}, {}
     
     # Enhanced feature engineering
@@ -124,17 +142,21 @@ def load_comprehensive_data(max_tickers: int = None):
     enhanced_feature_config['advanced_features'] = True
     enhanced_feature_config['cache_features'] = True
     
-    with st.spinner("ðŸ”§ Engineering advanced features..."):
-        featured_data = engineer_features_enhanced(
-            raw_data, 
-            config=enhanced_feature_config,
-            use_cache=True,
-            parallel=True
-        )
+    with st.spinner("Engineering advanced features..."):
+        try:
+            featured_data = engineer_features_enhanced(
+                raw_data, 
+                config=enhanced_feature_config,
+                use_cache=True,
+                parallel=True
+            )
+        except Exception as e:
+            st.error(f"Feature engineering failed: {e}")
+            return raw_data, {}
     
     return raw_data, featured_data
 
-@st.cache_data(ttl=3600, show_spinner="ðŸ¤– Loading/Training ML models...")
+@st.cache_data(ttl=3600, show_spinner="Loading/Training ML models...")
 def load_or_train_enhanced_models(featured_data, force_retrain=False):
     """Load or train enhanced ML models"""
     
@@ -142,10 +164,10 @@ def load_or_train_enhanced_models(featured_data, force_retrain=False):
         try:
             existing_models = load_models_optimized()
             if existing_models:
-                st.success("âœ… Loaded existing enhanced models")
+                st.success("✅ Loaded existing enhanced models")
                 return existing_models, {"loaded_from_cache": True, "model_count": len(existing_models)}
-        except:
-            st.info("ðŸ”„ No existing models found. Training new enhanced models...")
+        except Exception as e:
+            st.info(f"ℹ️ No existing models found. Training new enhanced models... ({e})")
     
     # Enhanced model configuration
     enhanced_config = ENHANCED_MODEL_CONFIG.copy()
@@ -160,16 +182,23 @@ def load_or_train_enhanced_models(featured_data, force_retrain=False):
         enhanced_config['batch_size'] = 6
         enhanced_config['feature_selection_top_k'] = 75
     
-    st.info(f"ðŸš€ Training enhanced models for {total_tickers} tickers...")
+    st.info(f"🚀 Training enhanced models for {total_tickers} tickers...")
     
-    with st.spinner("ðŸ”¥ Training advanced ML models..."):
-        results = train_models_enhanced_parallel(featured_data, enhanced_config)
+    with st.spinner("🧠 Training advanced ML models..."):
+        try:
+            results = train_models_enhanced_parallel(featured_data, enhanced_config)
+        except Exception as e:
+            st.error(f"Model training failed: {e}")
+            return {}, {"training_failed": True, "error": str(e)}
     
     if results['models']:
-        save_models_optimized(results['models'])
-        st.success(f"âœ… Enhanced training completed! Success rate: {results['training_summary']['success_rate']:.1%}")
+        try:
+            save_models_optimized(results['models'])
+            st.success(f"✅ Enhanced training completed! Success rate: {results['training_summary']['success_rate']:.1%}")
+        except Exception as e:
+            st.warning(f"Model saving failed: {e}")
     else:
-        st.error("âŒ Enhanced model training failed")
+        st.error("❌ Enhanced model training failed")
     
     return results['models'], results['training_summary']
 
@@ -177,11 +206,11 @@ def create_enhanced_prediction_dashboard(predictions_df, raw_data):
     """Create comprehensive enhanced prediction dashboard"""
     
     if predictions_df.empty:
-        st.warning("âš ï¸ No predictions available")
+        st.warning("⚠️ No predictions available")
         return
     
     # Enhanced metrics section
-    st.subheader("ðŸ“Š Enhanced Market Intelligence")
+    st.subheader("📊 Enhanced Market Intelligence")
     
     col1, col2, col3, col4, col5 = st.columns(5)
     
@@ -207,7 +236,7 @@ def create_enhanced_prediction_dashboard(predictions_df, raw_data):
         bearish_count = total_predictions - bullish_count
         st.metric(
             "Market Sentiment", 
-            f"{bullish_count}ðŸ“ˆ / {bearish_count}ðŸ“‰",
+            f"{bullish_count}↗ / {bearish_count}↘",
             delta=f"{bullish_count/total_predictions:.1%} bullish"
         )
     
@@ -229,7 +258,7 @@ def create_enhanced_prediction_dashboard(predictions_df, raw_data):
         )
     
     # Enhanced top recommendations
-    st.subheader("ðŸŽ¯ Top Investment Opportunities")
+    st.subheader("🏆 Top Investment Opportunities")
     
     # Advanced filtering and scoring
     predictions_df['composite_score'] = (
@@ -247,7 +276,7 @@ def create_enhanced_prediction_dashboard(predictions_df, raw_data):
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.markdown("### ðŸ“ˆ **TOP BUY RECOMMENDATIONS**")
+        st.markdown("### 📈 **TOP BUY RECOMMENDATIONS**")
         for i, (_, row) in enumerate(bullish_recs.iterrows()):
             with st.container():
                 recommendation_col1, recommendation_col2, recommendation_col3, recommendation_col4 = st.columns([2, 2, 2, 1])
@@ -257,35 +286,35 @@ def create_enhanced_prediction_dashboard(predictions_df, raw_data):
                     st.caption(f"Rank #{i+1}")
                 
                 with recommendation_col2:
-                    st.markdown(f"ðŸŽ¯ **{row['success_prob']:.1%}** success")
+                    st.markdown(f"🏯 **{row['success_prob']:.1%}** success")
                     st.caption(f"Risk: {row['risk_score']:.2f}")
                 
                 with recommendation_col3:
-                    st.markdown(f"ðŸ¤– **{row['ensemble_confidence']:.1%}** confidence")
+                    st.markdown(f"🤖 **{row['ensemble_confidence']:.1%}** confidence")
                     st.caption(f"Models: {row['models_used']}")
                 
                 with recommendation_col4:
                     composite_score = row['composite_score']
                     if composite_score > 0.8:
-                        st.markdown("ðŸŸ¢ **STRONG**")
+                        st.markdown("🟢 **STRONG**")
                     elif composite_score > 0.6:
-                        st.markdown("ðŸŸ¡ **MODERATE**")
+                        st.markdown("🟡 **MODERATE**")
                     else:
-                        st.markdown("ðŸŸ  **WEAK**")
+                        st.markdown("🔴 **WEAK**")
                 
                 st.markdown("---")
     
     with col2:
-        st.markdown("### ðŸ“‰ **TOP SELL SIGNALS**")
+        st.markdown("### 📉 **TOP SELL SIGNALS**")
         for i, (_, row) in enumerate(bearish_recs.iterrows()):
             st.markdown(f"**{row['ticker']}** - {row['success_prob']:.1%}")
             st.caption(f"Confidence: {row['ensemble_confidence']:.1%}")
             st.markdown("---")
     
     # Enhanced visualizations
-    st.subheader("ðŸ“ˆ Advanced Market Analysis")
+    st.subheader("📈 Advanced Market Analysis")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["ðŸŽ¯ Performance Analysis", "âš–ï¸ Risk Assessment", "ðŸ¤– Model Insights", "ðŸ“Š Market Overview"])
+    tab1, tab2, tab3, tab4 = st.tabs(["🏆 Performance Analysis", "⚡ Risk Assessment", "🤖 Model Insights", "📊 Market Overview"])
     
     with tab1:
         col1, col2 = st.columns(2)
@@ -432,14 +461,14 @@ def create_enhanced_prediction_dashboard(predictions_df, raw_data):
 def create_advanced_portfolio_optimizer(predictions_df):
     """Create advanced portfolio optimization with modern techniques"""
     
-    st.subheader("ðŸ’¼ Advanced Portfolio Optimization")
+    st.subheader("💼 Advanced Portfolio Optimization")
     
     # Portfolio parameters
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         investment_amount = st.number_input(
-            "Investment Amount (â‚¹)", 
+            "Investment Amount (₹)", 
             min_value=10000, 
             max_value=50000000, 
             value=500000,
@@ -470,7 +499,7 @@ def create_advanced_portfolio_optimizer(predictions_df):
         )
     
     # Advanced constraints
-    with st.expander("ðŸ”§ Advanced Settings"):
+    with st.expander("🔧 Advanced Settings"):
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -485,7 +514,7 @@ def create_advanced_portfolio_optimizer(predictions_df):
             sector_diversification = st.checkbox("Sector Diversification", True)
             rebalance_frequency = st.selectbox("Rebalancing", ["Monthly", "Quarterly", "Semi-Annual"], 1)
     
-    if st.button("ðŸŽ¯ Generate Optimal Portfolio", type="primary"):
+    if st.button("Generate Optimal Portfolio", type="primary"):
         
         # Risk tolerance mapping
         risk_filters = {
@@ -506,7 +535,7 @@ def create_advanced_portfolio_optimizer(predictions_df):
         ]
         
         if len(filtered_df) == 0:
-            st.warning("âš ï¸ No stocks match your criteria. Try relaxing your parameters.")
+            st.warning("No stocks match your criteria. Try relaxing your parameters.")
             return
         
         # Portfolio optimization based on method
@@ -550,7 +579,7 @@ def create_advanced_portfolio_optimizer(predictions_df):
         portfolio_confidence = (portfolio_df['ensemble_confidence'] * portfolio_df['weight']).sum()
         
         # Display results
-        st.success(f"âœ… Generated {optimization_method} optimized portfolio with {len(portfolio_df)} stocks")
+        st.success(f"Generated {optimization_method} optimized portfolio with {len(portfolio_df)} stocks")
         
         # Portfolio metrics
         col1, col2, col3, col4 = st.columns(4)
@@ -566,7 +595,7 @@ def create_advanced_portfolio_optimizer(predictions_df):
             st.metric("Sharpe Proxy", f"{sharpe_proxy:.2f}")
         
         # Portfolio composition
-        st.subheader("ðŸ“‹ Portfolio Composition")
+        st.subheader("Portfolio Composition")
         
         # Enhanced portfolio display
         for i, (_, row) in enumerate(portfolio_df.iterrows()):
@@ -580,21 +609,21 @@ def create_advanced_portfolio_optimizer(predictions_df):
                     st.markdown(f"**{row['weight']:.1%}**")
                 
                 with col3:
-                    st.markdown(f"â‚¹{row['investment_amount']:,.0f}")
+                    st.markdown(f"₹{row['investment_amount']:,.0f}")
                 
                 with col4:
-                    st.markdown(f"ðŸŽ¯ {row['success_prob']:.1%}")
+                    st.markdown(f"{row['success_prob']:.1%}")
                     st.caption(f"Risk: {row['risk_score']:.2f}")
                 
                 with col5:
-                    st.markdown(f"ðŸ¤– {row['ensemble_confidence']:.1%}")
+                    st.markdown(f"{row['ensemble_confidence']:.1%}")
                     st.caption(f"Models: {row['models_used']}")
                 
                 # Progress bar for weight
                 st.progress(row['weight'] / max_single_weight)
         
         # Portfolio visualization
-        st.subheader("ðŸ“Š Portfolio Visualization")
+        st.subheader("Portfolio Visualization")
         
         col1, col2 = st.columns(2)
         
@@ -629,20 +658,20 @@ def main():
     """Enhanced main application function"""
     
     # Enhanced header
-    st.markdown('<div class="main-header">ðŸš€ AI Stock Advisor Pro - Enhanced</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">AI Stock Advisor Pro - Enhanced</div>', unsafe_allow_html=True)
     st.markdown("*Powered by Advanced Machine Learning, Ensemble Methods & 15+ Years of Historical Data*")
     
     # Enhanced sidebar
-    st.sidebar.header("âš™ï¸ Enhanced Configuration")
+    st.sidebar.header("Enhanced Configuration")
     
     # Data and model settings
-    with st.sidebar.expander("ðŸ“Š Data Settings"):
+    with st.sidebar.expander("Data Settings"):
         max_tickers = st.slider("Max Tickers to Analyze", 50, 200, 100, 10)
         historical_period = st.selectbox("Historical Data Period", ["10y", "15y", "20y"], index=1)
         use_database = st.checkbox("Use Database Cache", True)
     
     # Model settings
-    with st.sidebar.expander("ðŸ¤– Model Settings"):
+    with st.sidebar.expander("Model Settings"):
         investment_horizon = st.selectbox(
             "Investment Horizon",
             ["next_week", "next_month", "next_quarter", "next_year"],
@@ -662,65 +691,75 @@ def main():
         )
     
     # Advanced settings
-    with st.sidebar.expander("ðŸ”§ Advanced Settings"):
+    with st.sidebar.expander("Advanced Settings"):
         force_retrain = st.checkbox("Force Model Retraining")
         hyperparameter_tuning = st.checkbox("Hyperparameter Optimization", True)
         model_calibration = st.checkbox("Model Calibration", True)
         feature_importance = st.checkbox("Feature Importance Analysis", True)
     
     # Performance monitoring
-    if st.sidebar.button("ðŸ“Š System Performance"):
-        st.sidebar.success("ðŸš€ Enhanced System Status:")
-        st.sidebar.info("â€¢ Training Speed: 3-5x faster")
-        st.sidebar.info("â€¢ Model Accuracy: +15% improvement")
-        st.sidebar.info("â€¢ Feature Count: 200+ features")
-        st.sidebar.info("â€¢ Ensemble Power: Multi-model consensus")
-        st.sidebar.info("â€¢ Historical Data: Up to 20 years")
+    if st.sidebar.button("System Performance"):
+        st.sidebar.success("Enhanced System Status:")
+        st.sidebar.info("• Training Speed: 3-5x faster")
+        st.sidebar.info("• Model Accuracy: +15% improvement")
+        st.sidebar.info("• Feature Count: 200+ features")
+        st.sidebar.info("• Ensemble Power: Multi-model consensus")
+        st.sidebar.info("• Historical Data: Up to 20 years")
     
     # Main content with enhanced tabs
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "ðŸŽ¯ Enhanced Predictions", 
-        "ðŸ’¼ Advanced Portfolio", 
-        "ðŸ“Š Model Analytics", 
-        "ðŸ“ˆ Market Intelligence",
-        "âš™ï¸ System Dashboard"
+        "Enhanced Predictions", 
+        "Advanced Portfolio", 
+        "Model Analytics", 
+        "Market Intelligence",
+        "System Dashboard"
     ])
     
     try:
         # Load enhanced data and models
-        with st.spinner("ðŸ”„ Initializing enhanced AI system..."):
+        with st.spinner("Initializing enhanced AI system..."):
             raw_data, featured_data = load_comprehensive_data(max_tickers)
             
             if not featured_data:
-                st.error("âŒ Failed to load stock data. Please check your connection and try again.")
+                st.error("Failed to load stock data. Please check your connection and try again.")
                 return
             
             models, training_summary = load_or_train_enhanced_models(featured_data, force_retrain)
         
         if not models:
-            st.error("âŒ No trained models available. Please check your data and try again.")
+            st.error("No trained models available. Please check your data and try again.")
             return
         
         # Generate enhanced predictions
-        with st.spinner("ðŸŽ¯ Generating enhanced predictions..."):
-            predictions_df = predict_with_ensemble(
-                models, featured_data, investment_horizon, 
-                model_types, ensemble_method
-            )
+        with st.spinner("Generating enhanced predictions..."):
+            try:
+                predictions_df = predict_with_ensemble(
+                    models, featured_data, investment_horizon, 
+                    model_types, ensemble_method
+                )
+            except Exception as e:
+                st.error(f"Prediction generation failed: {e}")
+                predictions_df = pd.DataFrame()
         
         # Tab 1: Enhanced Predictions Dashboard
         with tab1:
-            st.header("ðŸŽ¯ Enhanced Stock Predictions & AI Insights")
-            create_enhanced_prediction_dashboard(predictions_df, raw_data)
+            st.header("Enhanced Stock Predictions & AI Insights")
+            if not predictions_df.empty:
+                create_enhanced_prediction_dashboard(predictions_df, raw_data)
+            else:
+                st.warning("No predictions available. Please check your model configuration.")
         
         # Tab 2: Advanced Portfolio Optimization
         with tab2:
-            st.header("ðŸ’¼ Advanced Portfolio Optimization")
-            create_advanced_portfolio_optimizer(predictions_df)
+            st.header("Advanced Portfolio Optimization")
+            if not predictions_df.empty:
+                create_advanced_portfolio_optimizer(predictions_df)
+            else:
+                st.warning("No predictions available for portfolio optimization.")
         
         # Tab 3: Model Analytics & Performance
         with tab3:
-            st.header("ðŸ“Š Advanced Model Analytics")
+            st.header("Advanced Model Analytics")
             
             if training_summary and 'training_results' in training_summary:
                 # Training performance metrics
@@ -766,102 +805,107 @@ def main():
                             color_continuous_scale='viridis'
                         )
                         st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No training analytics available. Train models to see performance metrics.")
         
         # Tab 4: Market Intelligence
         with tab4:
-            st.header("ðŸ“ˆ Advanced Market Intelligence")
+            st.header("Advanced Market Intelligence")
             
-            # Market overview metrics
-            col1, col2, col3, col4 = st.columns(4)
-            
-            market_metrics = {
-                'total_stocks': len(predictions_df),
-                'bullish_signals': len(predictions_df[predictions_df['predicted_return'] == 1]),
-                'high_confidence': len(predictions_df[predictions_df['ensemble_confidence'] > 0.8]),
-                'low_risk': len(predictions_df[predictions_df['risk_score'] < 0.3])
-            }
-            
-            with col1:
-                st.metric("Market Coverage", f"{market_metrics['total_stocks']} stocks")
-            with col2:
-                st.metric("Bullish Signals", f"{market_metrics['bullish_signals']}")
-                st.caption(f"{market_metrics['bullish_signals']/market_metrics['total_stocks']:.1%} of market")
-            with col3:
-                st.metric("High Confidence", f"{market_metrics['high_confidence']}")
-                st.caption(f"{market_metrics['high_confidence']/market_metrics['total_stocks']:.1%} confidence")
-            with col4:
-                st.metric("Low Risk Opportunities", f"{market_metrics['low_risk']}")
-                st.caption(f"{market_metrics['low_risk']/market_metrics['total_stocks']:.1%} low risk")
-            
-            # Market heatmap
-            st.subheader("ðŸ”¥ Market Heatmap")
-            
-            # Create market segments
-            predictions_df['market_segment'] = predictions_df.apply(lambda row: 
-                'High Potential' if row['success_prob'] > 0.7 and row['risk_score'] < 0.5 else
-                'Risky Growth' if row['success_prob'] > 0.6 and row['risk_score'] > 0.6 else
-                'Conservative' if row['success_prob'] > 0.5 and row['risk_score'] < 0.4 else
-                'Speculative', axis=1
-            )
-            
-            segment_counts = predictions_df['market_segment'].value_counts()
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Market segments pie chart
-                fig = px.pie(
-                    values=segment_counts.values,
-                    names=segment_counts.index,
-                    title="Market Segment Distribution",
-                    color_discrete_sequence=['#56ab2f', '#f5576c', '#667eea', '#764ba2']
+            if not predictions_df.empty:
+                # Market overview metrics
+                col1, col2, col3, col4 = st.columns(4)
+                
+                market_metrics = {
+                    'total_stocks': len(predictions_df),
+                    'bullish_signals': len(predictions_df[predictions_df['predicted_return'] == 1]),
+                    'high_confidence': len(predictions_df[predictions_df['ensemble_confidence'] > 0.8]),
+                    'low_risk': len(predictions_df[predictions_df['risk_score'] < 0.3])
+                }
+                
+                with col1:
+                    st.metric("Market Coverage", f"{market_metrics['total_stocks']} stocks")
+                with col2:
+                    st.metric("Bullish Signals", f"{market_metrics['bullish_signals']}")
+                    st.caption(f"{market_metrics['bullish_signals']/market_metrics['total_stocks']:.1%} of market")
+                with col3:
+                    st.metric("High Confidence", f"{market_metrics['high_confidence']}")
+                    st.caption(f"{market_metrics['high_confidence']/market_metrics['total_stocks']:.1%} confidence")
+                with col4:
+                    st.metric("Low Risk Opportunities", f"{market_metrics['low_risk']}")
+                    st.caption(f"{market_metrics['low_risk']/market_metrics['total_stocks']:.1%} low risk")
+                
+                # Market heatmap
+                st.subheader("Market Heatmap")
+                
+                # Create market segments
+                predictions_df['market_segment'] = predictions_df.apply(lambda row: 
+                    'High Potential' if row['success_prob'] > 0.7 and row['risk_score'] < 0.5 else
+                    'Risky Growth' if row['success_prob'] > 0.6 and row['risk_score'] > 0.6 else
+                    'Conservative' if row['success_prob'] > 0.5 and row['risk_score'] < 0.4 else
+                    'Speculative', axis=1
                 )
-                st.plotly_chart(fig, use_container_width=True)
-            
-            with col2:
-                # Success probability vs risk heatmap
-                fig = px.density_heatmap(
-                    predictions_df,
-                    x='risk_score',
-                    y='success_prob',
-                    title="Risk-Return Density Map",
-                    color_continuous_scale='viridis'
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Top performers by category
-            st.subheader("ðŸ† Category Leaders")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.markdown("### ðŸš€ **Highest Growth Potential**")
-                high_growth = predictions_df.nlargest(5, 'success_prob')
-                for _, row in high_growth.iterrows():
-                    st.markdown(f"**{row['ticker']}** - {row['success_prob']:.1%}")
-                    st.caption(f"Confidence: {row['ensemble_confidence']:.1%}")
-            
-            with col2:
-                st.markdown("### ðŸ›¡ï¸ **Lowest Risk**")
-                low_risk = predictions_df.nsmallest(5, 'risk_score')
-                for _, row in low_risk.iterrows():
-                    st.markdown(f"**{row['ticker']}** - Risk: {row['risk_score']:.2f}")
-                    st.caption(f"Success: {row['success_prob']:.1%}")
-            
-            with col3:
-                st.markdown("### ðŸŽ¯ **Best Risk-Adjusted**")
-                predictions_df['risk_adj'] = predictions_df['success_prob'] / (predictions_df['risk_score'] + 0.01)
-                best_adjusted = predictions_df.nlargest(5, 'risk_adj')
-                for _, row in best_adjusted.iterrows():
-                    st.markdown(f"**{row['ticker']}** - Ratio: {row['risk_adj']:.2f}")
-                    st.caption(f"Success: {row['success_prob']:.1%}, Risk: {row['risk_score']:.2f}")
+                
+                segment_counts = predictions_df['market_segment'].value_counts()
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Market segments pie chart
+                    fig = px.pie(
+                        values=segment_counts.values,
+                        names=segment_counts.index,
+                        title="Market Segment Distribution",
+                        color_discrete_sequence=['#56ab2f', '#f5576c', '#667eea', '#764ba2']
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    # Success probability vs risk heatmap
+                    fig = px.density_heatmap(
+                        predictions_df,
+                        x='risk_score',
+                        y='success_prob',
+                        title="Risk-Return Density Map",
+                        color_continuous_scale='viridis'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Top performers by category
+                st.subheader("Category Leaders")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.markdown("### **Highest Growth Potential**")
+                    high_growth = predictions_df.nlargest(5, 'success_prob')
+                    for _, row in high_growth.iterrows():
+                        st.markdown(f"**{row['ticker']}** - {row['success_prob']:.1%}")
+                        st.caption(f"Confidence: {row['ensemble_confidence']:.1%}")
+                
+                with col2:
+                    st.markdown("### **Lowest Risk**")
+                    low_risk = predictions_df.nsmallest(5, 'risk_score')
+                    for _, row in low_risk.iterrows():
+                        st.markdown(f"**{row['ticker']}** - Risk: {row['risk_score']:.2f}")
+                        st.caption(f"Success: {row['success_prob']:.1%}")
+                
+                with col3:
+                    st.markdown("### **Best Risk-Adjusted**")
+                    predictions_df['risk_adj'] = predictions_df['success_prob'] / (predictions_df['risk_score'] + 0.01)
+                    best_adjusted = predictions_df.nlargest(5, 'risk_adj')
+                    for _, row in best_adjusted.iterrows():
+                        st.markdown(f"**{row['ticker']}** - Ratio: {row['risk_adj']:.2f}")
+                        st.caption(f"Success: {row['success_prob']:.1%}, Risk: {row['risk_score']:.2f}")
+            else:
+                st.warning("No market intelligence available. Please generate predictions first.")
         
         # Tab 5: System Dashboard
         with tab5:
-            st.header("âš™ï¸ Enhanced System Dashboard")
+            st.header("Enhanced System Dashboard")
             
             # System performance metrics
-            st.subheader("ðŸ–¥ï¸ System Performance")
+            st.subheader("System Performance")
             
             col1, col2, col3, col4 = st.columns(4)
             
@@ -879,7 +923,7 @@ def main():
                 st.caption("Deep market history")
             
             # Feature engineering status
-            st.subheader("ðŸ”§ Feature Engineering Status")
+            st.subheader("Feature Engineering Status")
             
             feature_categories = {
                 'Price Features': 85,
@@ -897,7 +941,7 @@ def main():
                 st.progress(completion / 100, text=f"{category}: {completion}%")
             
             # Model performance summary
-            st.subheader("ðŸ¤– Model Performance Summary")
+            st.subheader("Model Performance Summary")
             
             if training_summary and 'training_results' in training_summary:
                 performance_data = []
@@ -913,17 +957,19 @@ def main():
                 
                 perf_df = pd.DataFrame(performance_data)
                 st.dataframe(perf_df, use_container_width=True)
+            else:
+                st.info("No performance data available. Train models to see metrics.")
             
             # System health checks
-            st.subheader("ðŸ¥ System Health")
+            st.subheader("System Health")
             
             health_checks = {
-                "Data Pipeline": "ðŸŸ¢ Operational",
-                "Feature Engineering": "ðŸŸ¢ Optimal",
-                "Model Training": "ðŸŸ¢ Complete",
-                "Prediction Engine": "ðŸŸ¢ Active",
-                "Cache System": "ðŸŸ¢ Efficient",
-                "Database": "ðŸŸ¢ Connected"
+                "Data Pipeline": "Operational",
+                "Feature Engineering": "Optimal",
+                "Model Training": "Complete",
+                "Prediction Engine": "Active",
+                "Cache System": "Efficient",
+                "Database": "Connected"
             }
             
             col1, col2 = st.columns(2)
@@ -937,7 +983,7 @@ def main():
                     st.markdown(f"**{check}**: {status}")
             
             # Memory and resource usage
-            st.subheader("ðŸ“Š Resource Usage")
+            st.subheader("Resource Usage")
             
             col1, col2, col3 = st.columns(3)
             
@@ -960,44 +1006,47 @@ def main():
                 st.progress(cache_efficiency / 100)
             
             # Advanced system controls
-            st.subheader("âš™ï¸ Advanced Controls")
+            st.subheader("Advanced Controls")
             
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                if st.button("ðŸ”„ Refresh Data Cache"):
+                if st.button("Refresh Data Cache"):
                     st.info("Data cache refreshed successfully!")
             
             with col2:
-                if st.button("ðŸ§¹ Clear Memory"):
+                if st.button("Clear Memory"):
                     gc.collect()
                     st.success("Memory optimized!")
             
             with col3:
-                if st.button("ðŸ“Š Export Results"):
+                if st.button("Export Results"):
                     # Create export data
-                    export_data = {
-                        'predictions': predictions_df.to_dict('records'),
-                        'timestamp': datetime.now().isoformat(),
-                        'model_config': {
-                            'horizon': investment_horizon,
-                            'ensemble_method': ensemble_method,
-                            'model_types': model_types
+                    if not predictions_df.empty:
+                        export_data = {
+                            'predictions': predictions_df.to_dict('records'),
+                            'timestamp': datetime.now().isoformat(),
+                            'model_config': {
+                                'horizon': investment_horizon,
+                                'ensemble_method': ensemble_method,
+                                'model_types': model_types
+                            }
                         }
-                    }
-                    st.download_button(
-                        "ðŸ“¥ Download Results",
-                        data=pd.DataFrame(predictions_df).to_csv(index=False),
-                        file_name=f"ai_stock_predictions_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                        mime="text/csv"
-                    )
+                        st.download_button(
+                            "Download Results",
+                            data=pd.DataFrame(predictions_df).to_csv(index=False),
+                            file_name=f"ai_stock_predictions_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                            mime="text/csv"
+                        )
+                    else:
+                        st.warning("No results to export.")
     
     except Exception as e:
-        st.error(f"âŒ Application error: {str(e)}")
-        st.info("ðŸ’¡ Try refreshing the page or adjusting your settings")
+        st.error(f"Application error: {str(e)}")
+        st.info("Try refreshing the page or adjusting your settings")
         
         # Error details for debugging
-        with st.expander("ðŸ”§ Error Details"):
+        with st.expander("Error Details"):
             st.code(str(e))
     
     # Footer
@@ -1005,8 +1054,8 @@ def main():
     st.markdown("""
     <div style='text-align: center; color: #666; padding: 20px;'>
         <p><strong>AI Stock Advisor Pro - Enhanced Version</strong></p>
-        <p>Powered by Advanced Machine Learning â€¢ Real-time Market Analysis â€¢ Professional-Grade Insights</p>
-        <p><em>âš ï¸ Disclaimer: This tool provides analysis for educational purposes. Always consult financial advisors for investment decisions.</em></p>
+        <p>Powered by Advanced Machine Learning • Real-time Market Analysis • Professional-Grade Insights</p>
+        <p><em>Disclaimer: This tool provides analysis for educational purposes. Always consult financial advisors for investment decisions.</em></p>
     </div>
     """, unsafe_allow_html=True)
 
