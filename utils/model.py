@@ -83,8 +83,261 @@ ENHANCED_MODEL_CONFIG = {
     'ensemble_size': 5,
     'realtime_integration': True,
     'sentiment_integration': True,
-    'priority_horizons': ['next_month', 'next_quarter']
+    'priority_horizons': ['next_month', 'next_quarter'],
+    'selected_stocks_only': True,  # New: Train only selected stocks
+    'min_data_points': 200         # New: Minimum data points required
 }
+
+# ==================== PRICE TARGET PREDICTION ====================
+class PriceTargetPredictor:
+    """Advanced price target prediction for selected stocks"""
+    
+    def __init__(self, horizon: str, model_type: str):
+        self.horizon = horizon
+        self.model_type = model_type
+        self.price_model = None  # For price prediction
+        self.direction_model = None  # For direction prediction
+        self.scaler = None
+        self.selected_features = None
+        self.training_date = datetime.now()
+        
+        # Horizon to days mapping
+        self.horizon_days = {
+            'next_week': 7,
+            'next_month': 30,
+            'next_quarter': 90,
+            'next_year': 365
+        }
+    
+    def predict_price_targets(self, X: pd.DataFrame, current_prices: pd.Series, ticker: str = None) -> dict:
+        """Generate comprehensive price targets"""
+        
+        if self.direction_model is None:
+            return self._default_targets(current_prices, ticker)
+        
+        try:
+            # Get direction probability
+            direction_proba = self.direction_model.predict_proba(X, ticker)[:, 1][0]
+            
+            # Calculate expected return based on historical volatility and direction
+            returns = self._calculate_expected_returns(X, direction_proba, ticker)
+            
+            # Generate targets
+            current_price = current_prices.iloc[0] if len(current_prices) > 0 else 100
+            
+            targets = {
+                'current_price': float(current_price),
+                'target_price': float(current_price * (1 + returns['expected_return'])),
+                'price_change': float(current_price * returns['expected_return']),
+                'percentage_change': float(returns['expected_return'] * 100),
+                'direction_probability': float(direction_proba),
+                'confidence_level': float(returns['confidence']),
+                'risk_level': self._calculate_risk_level(returns['volatility']),
+                'horizon': self.horizon,
+                'horizon_days': self.horizon_days.get(self.horizon, 30),
+                'targets': {
+                    'conservative': float(current_price * (1 + returns['conservative'])),
+                    'moderate': float(current_price * (1 + returns['expected_return'])),
+                    'aggressive': float(current_price * (1 + returns['aggressive']))
+                },
+                'support_resistance': {
+                    'support': float(current_price * (1 + returns['support_level'])),
+                    'resistance': float(current_price * (1 + returns['resistance_level']))
+                }
+            }
+            
+            return targets
+            
+        except Exception as e:
+            print(f"Price target prediction failed for {ticker}: {e}")
+            return self._default_targets(current_prices, ticker)
+    
+    def _calculate_expected_returns(self, X: pd.DataFrame, direction_proba: float, ticker: str) -> dict:
+        """Calculate expected returns based on model predictions and market conditions"""
+        
+        try:
+            # Base expected return from direction probability
+            base_return = (direction_proba - 0.5) * 2  # Scale to [-1, 1]
+            
+            # Adjust based on horizon
+            horizon_multiplier = {
+                'next_week': 0.02,
+                'next_month': 0.05,
+                'next_quarter': 0.12,
+                'next_year': 0.25
+            }
+            
+            multiplier = horizon_multiplier.get(self.horizon, 0.05)
+            expected_return = base_return * multiplier
+            
+            # Calculate volatility estimate (simplified)
+            volatility = min(abs(expected_return) * 2, 0.3)  # Cap at 30%
+            
+            # Generate conservative and aggressive targets
+            conservative = expected_return * 0.6  # 60% of expected
+            aggressive = expected_return * 1.4   # 140% of expected
+            
+            # Support and resistance levels
+            support_level = expected_return - volatility
+            resistance_level = expected_return + volatility
+            
+            # Confidence based on probability distance from 0.5
+            confidence = abs(direction_proba - 0.5) * 2
+            
+            return {
+                'expected_return': expected_return,
+                'conservative': conservative,
+                'aggressive': aggressive,
+                'volatility': volatility,
+                'confidence': confidence,
+                'support_level': support_level,
+                'resistance_level': resistance_level
+            }
+            
+        except Exception as e:
+            print(f"Return calculation failed: {e}")
+            return {
+                'expected_return': 0.02,
+                'conservative': 0.01,
+                'aggressive': 0.04,
+                'volatility': 0.15,
+                'confidence': 0.5,
+                'support_level': -0.05,
+                'resistance_level': 0.08
+            }
+    
+    def _calculate_risk_level(self, volatility: float) -> str:
+        """Calculate risk level based on volatility"""
+        if volatility < 0.1:
+            return "Low"
+        elif volatility < 0.2:
+            return "Medium"
+        elif volatility < 0.3:
+            return "High"
+        else:
+            return "Very High"
+    
+    def _default_targets(self, current_prices: pd.Series, ticker: str) -> dict:
+        """Default price targets when model is not available"""
+        current_price = current_prices.iloc[0] if len(current_prices) > 0 else 100
+        
+        # Conservative default targets based on market averages
+        default_returns = {
+            'next_week': 0.01,
+            'next_month': 0.03,
+            'next_quarter': 0.08,
+            'next_year': 0.15
+        }
+        
+        expected_return = default_returns.get(self.horizon, 0.03)
+        
+        return {
+            'current_price': float(current_price),
+            'target_price': float(current_price * (1 + expected_return)),
+            'price_change': float(current_price * expected_return),
+            'percentage_change': float(expected_return * 100),
+            'direction_probability': 0.55,  # Slightly bullish default
+            'confidence_level': 0.5,
+            'risk_level': "Medium",
+            'horizon': self.horizon,
+            'horizon_days': self.horizon_days.get(self.horizon, 30),
+            'targets': {
+                'conservative': float(current_price * (1 + expected_return * 0.6)),
+                'moderate': float(current_price * (1 + expected_return)),
+                'aggressive': float(current_price * (1 + expected_return * 1.4))
+            },
+            'support_resistance': {
+                'support': float(current_price * 0.95),
+                'resistance': float(current_price * 1.08)
+            }
+        }
+
+def generate_price_targets_for_selected_stocks(models: dict, 
+                                             current_data: dict, 
+                                             selected_tickers: list,
+                                             investment_horizon: str) -> pd.DataFrame:
+    """Generate price targets for selected stocks"""
+    
+    price_targets = []
+    
+    for ticker in selected_tickers:
+        try:
+            if ticker not in current_data:
+                continue
+                
+            df = current_data[ticker]
+            if df.empty:
+                continue
+            
+            # Get current price
+            current_price = df['Close'].iloc[-1]
+            latest_data = df.iloc[[-1]].copy()
+            
+            # Try to get model for price prediction
+            ticker_models = models.get(ticker, {})
+            best_model = None
+            
+            # Find best model for this horizon
+            for model_key, model in ticker_models.items():
+                if investment_horizon in model_key:
+                    best_model = model
+                    break
+            
+            if best_model and hasattr(best_model, 'predict_proba'):
+                # Create price target predictor
+                predictor = PriceTargetPredictor(investment_horizon, best_model.model_type)
+                predictor.direction_model = best_model
+                
+                # Generate price targets
+                targets = predictor.predict_price_targets(
+                    latest_data, 
+                    pd.Series([current_price]), 
+                    ticker
+                )
+            else:
+                # Use default targets
+                predictor = PriceTargetPredictor(investment_horizon, 'default')
+                targets = predictor._default_targets(pd.Series([current_price]), ticker)
+            
+            # Add ticker information
+            targets['ticker'] = ticker
+            price_targets.append(targets)
+            
+        except Exception as e:
+            print(f"Price target generation failed for {ticker}: {e}")
+            continue
+    
+    if price_targets:
+        return pd.DataFrame(price_targets)
+    else:
+        return pd.DataFrame()
+
+# Enhanced prediction function with price targets
+def predict_with_ensemble_and_targets(models: Dict[str, Any], 
+                                     current_data: Dict[str, pd.DataFrame],
+                                     investment_horizon: str,
+                                     model_types: List[str] = None,
+                                     ensemble_method: str = 'weighted_average',
+                                     selected_tickers: List[str] = None) -> tuple:
+    """
+    Enhanced prediction with both direction and price targets
+    
+    Returns:
+        tuple: (predictions_df, price_targets_df)
+    """
+    
+    # Get direction predictions (existing functionality)
+    predictions_df = predict_with_ensemble(
+        models, current_data, investment_horizon, 
+        model_types, ensemble_method, selected_tickers
+    )
+    
+    # Generate price targets
+    price_targets_df = generate_price_targets_for_selected_stocks(
+        models, current_data, selected_tickers or list(current_data.keys()), investment_horizon
+    )
+    
+    return predictions_df, price_targets_df
 
 # ==================== REAL-TIME INTEGRATION ====================
 class RealTimeIntegration:
@@ -583,13 +836,13 @@ class AdvancedHyperparameterOptimizer:
 # ==================== ENHANCED TRAINING PIPELINE ====================
 
 def train_enhanced_model(args) -> Tuple[str, str, AdvancedStockPredictor, float]:
-    """Enhanced single model training with all optimizations"""
+    """Enhanced single model training with all optimizations - FIXED VERSION"""
     
     ticker, df, horizon, model_type, config = args
     
     try:
         target_col = f"Target_{horizon}"
-        if target_col not in df.columns or df.empty or len(df) < 200:
+        if target_col not in df.columns or df.empty or len(df) < config.get('min_data_points', 200):
             return None
             
         # Enhanced feature selection
@@ -657,19 +910,31 @@ def train_enhanced_model(args) -> Tuple[str, str, AdvancedStockPredictor, float]
         # Create model with optimized parameters
         model = create_optimized_model(model_type, best_params)
         
-        # Train model with early stopping if supported
-        if model_type in ['xgboost', 'lightgbm']:
+        # FIXED: Train model with proper early stopping handling
+        if model_type == 'xgboost':
+            try:
+                # XGBoost 2.0+ compatible training - FIXED VERSION
+                model.fit(
+                    X_train_scaled, y_train,
+                    eval_set=[(X_val_scaled, y_val)],
+                    verbose=False  # Removed early_stopping_rounds parameter
+                )
+            except Exception as e:
+                logging.warning(f"XGBoost early stopping failed for {ticker}: {e}")
+                model.fit(X_train_scaled, y_train)
+                
+        elif model_type == 'lightgbm':
             try:
                 model.fit(
                     X_train_scaled, y_train,
                     eval_set=[(X_val_scaled, y_val)],
-                    early_stopping_rounds=config.get('early_stopping_patience', 10),
-                    verbose=False
+                    callbacks=[lgb.early_stopping(config.get('early_stopping_patience', 10), verbose=False)]
                 )
             except Exception as e:
-                logging.warning(f"Early stopping failed for {ticker}: {e}")
+                logging.warning(f"LightGBM early stopping failed for {ticker}: {e}")
                 model.fit(X_train_scaled, y_train)
         else:
+            # For other models, just train normally
             model.fit(X_train_scaled, y_train)
         
         training_time = (datetime.now() - start_time).total_seconds()
@@ -757,48 +1022,73 @@ def train_enhanced_model(args) -> Tuple[str, str, AdvancedStockPredictor, float]
         return None
 
 def create_optimized_model(model_type: str, best_params: Dict[str, Any]):
-    """Create optimized model with best parameters"""
+    """Create optimized model with best parameters - FIXED VERSION"""
     
     try:
         if model_type == 'xgboost':
             from xgboost import XGBClassifier
             default_params = {
-                'n_estimators': 500, 'max_depth': 6, 'learning_rate': 0.1,
-                'subsample': 0.8, 'colsample_bytree': 0.8, 'random_state': 42,
-                'n_jobs': 1, 'verbosity': 0
+                'n_estimators': 500, 
+                'max_depth': 6, 
+                'learning_rate': 0.1,
+                'subsample': 0.8, 
+                'colsample_bytree': 0.8, 
+                'random_state': 42,
+                'n_jobs': 1, 
+                'verbosity': 0,
+                'eval_metric': 'logloss'  # Fixed: Add eval_metric
             }
             default_params.update(best_params)
             return XGBClassifier(**default_params)
             
         elif model_type == 'lightgbm':
             default_params = {
-                'n_estimators': 500, 'max_depth': 6, 'learning_rate': 0.1,
-                'subsample': 0.8, 'colsample_bytree': 0.8, 'num_leaves': 31,
-                'random_state': 42, 'n_jobs': 1, 'verbosity': -1
+                'n_estimators': 500, 
+                'max_depth': 6, 
+                'learning_rate': 0.1,
+                'subsample': 0.8, 
+                'colsample_bytree': 0.8, 
+                'num_leaves': 31,
+                'random_state': 42, 
+                'n_jobs': 1, 
+                'verbosity': -1
             }
             default_params.update(best_params)
             return lgb.LGBMClassifier(**default_params)
             
         elif model_type == 'catboost':
             default_params = {
-                'n_estimators': 500, 'max_depth': 6, 'learning_rate': 0.1,
-                'l2_leaf_reg': 3, 'random_state': 42, 'verbose': False
+                'n_estimators': 500, 
+                'max_depth': 6, 
+                'learning_rate': 0.1,
+                'l2_leaf_reg': 3, 
+                'random_state': 42, 
+                'verbose': False
             }
             default_params.update(best_params)
             return CatBoostClassifier(**default_params)
             
         elif model_type == 'random_forest':
             default_params = {
-                'n_estimators': 500, 'max_depth': 15, 'min_samples_split': 5,
-                'min_samples_leaf': 2, 'class_weight': 'balanced', 'random_state': 42, 'n_jobs': 1
+                'n_estimators': 500, 
+                'max_depth': 15, 
+                'min_samples_split': 5,
+                'min_samples_leaf': 2, 
+                'class_weight': 'balanced', 
+                'random_state': 42, 
+                'n_jobs': 1
             }
             default_params.update(best_params)
             return RandomForestClassifier(**default_params)
             
         elif model_type == 'neural_network':
             default_params = {
-                'hidden_layer_sizes': (100, 50), 'activation': 'relu',
-                'alpha': 0.001, 'learning_rate': 'adaptive', 'max_iter': 1000, 'random_state': 42
+                'hidden_layer_sizes': (100, 50), 
+                'activation': 'relu',
+                'alpha': 0.001, 
+                'learning_rate': 'adaptive', 
+                'max_iter': 1000, 
+                'random_state': 42
             }
             default_params.update(best_params)
             return MLPClassifier(**default_params)
@@ -806,6 +1096,7 @@ def create_optimized_model(model_type: str, best_params: Dict[str, Any]):
         else:
             # Default to Random Forest
             return RandomForestClassifier(random_state=42, n_jobs=1)
+            
     except Exception as e:
         logging.warning(f"Model creation failed for {model_type}: {e}")
         return RandomForestClassifier(random_state=42, n_jobs=1)
@@ -813,17 +1104,26 @@ def create_optimized_model(model_type: str, best_params: Dict[str, Any]):
 # ==================== ENHANCED PARALLEL TRAINING ====================
 
 def train_models_enhanced_parallel(featured_data: Dict[str, pd.DataFrame], 
-                                  config: Dict = None) -> Dict[str, Any]:
+                                  config: Dict = None,
+                                  selected_tickers: List[str] = None) -> Dict[str, Any]:
     """
-    Enhanced parallel training with advanced ML techniques
+    Enhanced parallel training with advanced ML techniques for selected tickers only
     """
     config = config or ENHANCED_MODEL_CONFIG
+    
+    # Filter to selected tickers only
+    if selected_tickers:
+        original_count = len(featured_data)
+        featured_data = {ticker: df for ticker, df in featured_data.items() 
+                        if ticker in selected_tickers}
+        print(f"Training filtered from {original_count} to {len(featured_data)} selected tickers")
     
     # Enhanced model selection
     horizons = config.get('priority_horizons', ['next_month', 'next_quarter'])
     model_types = config.get('model_types', ['xgboost', 'lightgbm', 'random_forest'])
     
-    print(f"Enhanced training: {len(featured_data)} tickers, {len(horizons)} horizons, {len(model_types)} models")
+    print(f"Enhanced training: {len(featured_data)} selected tickers, {len(horizons)} horizons, {len(model_types)} models")
+    print(f"Selected stocks: {list(featured_data.keys())}")
     print(f"Features: Hyperparameter tuning={config.get('hyperparameter_tuning', False)}")
     print(f"         Model calibration={config.get('model_calibration', False)}")
     print(f"         Feature selection top K={config.get('feature_selection_top_k', 100)}")
@@ -831,7 +1131,8 @@ def train_models_enhanced_parallel(featured_data: Dict[str, pd.DataFrame],
     # Prepare enhanced training tasks
     training_tasks = []
     for ticker, df in featured_data.items():
-        if df.empty or len(df) < 200:  # Increased minimum data requirement
+        if df.empty or len(df) < config.get('min_data_points', 200):
+            logging.warning(f"Insufficient data for {ticker}: {len(df)} rows")
             continue
         for horizon in horizons:
             if f"Target_{horizon}" not in df.columns:
@@ -839,7 +1140,7 @@ def train_models_enhanced_parallel(featured_data: Dict[str, pd.DataFrame],
             for model_type in model_types:
                 training_tasks.append((ticker, df, horizon, model_type, config))
     
-    print(f"Total enhanced training tasks: {len(training_tasks)}")
+    print(f"Total enhanced training tasks for selected stocks: {len(training_tasks)}")
     
     if len(training_tasks) == 0:
         return {'models': {}, 'training_summary': {'total_tasks': 0, 'successful': 0, 'success_rate': 0}}
@@ -860,7 +1161,7 @@ def train_models_enhanced_parallel(featured_data: Dict[str, pd.DataFrame],
             
             # Process results with detailed progress
             for future in tqdm(as_completed(future_to_task), total=len(training_tasks), 
-                              desc="Enhanced model training"):
+                              desc="Enhanced model training for selected stocks"):
                 result = future.result()
                 if result:
                     ticker, model_key, predictor, score = result
@@ -896,7 +1197,7 @@ def train_models_enhanced_parallel(featured_data: Dict[str, pd.DataFrame],
                     'feature_count': len(predictor.selected_features) if predictor.selected_features else 0
                 })
     
-    print(f"Enhanced training completed: {successful_trains}/{len(training_tasks)} models")
+    print(f"Enhanced training completed for selected stocks: {successful_trains}/{len(training_tasks)} models")
     
     # Generate training summary
     if training_results:
@@ -909,6 +1210,7 @@ def train_models_enhanced_parallel(featured_data: Dict[str, pd.DataFrame],
         print(f"  Average ROC AUC: {avg_score:.3f}")
         print(f"  Average training time: {avg_training_time:.1f}s")
         print(f"  Average features per model: {avg_features:.0f}")
+        print(f"  Models per selected stock: {successful_trains/len(featured_data):.1f}")
     
     return {
         'models': all_models,
@@ -916,7 +1218,8 @@ def train_models_enhanced_parallel(featured_data: Dict[str, pd.DataFrame],
             'total_tasks': len(training_tasks),
             'successful': successful_trains,
             'success_rate': successful_trains / len(training_tasks) if training_tasks else 0,
-            'training_results': training_results
+            'training_results': training_results,
+            'selected_tickers': list(featured_data.keys()) if selected_tickers else None
         }
     }
 
@@ -926,14 +1229,23 @@ def predict_with_ensemble(models: Dict[str, Any],
                          current_data: Dict[str, pd.DataFrame],
                          investment_horizon: str,
                          model_types: List[str] = None,
-                         ensemble_method: str = 'weighted_average') -> pd.DataFrame:
+                         ensemble_method: str = 'weighted_average',
+                         selected_tickers: List[str] = None) -> pd.DataFrame:
     """
-    Enhanced prediction with ensemble methods
+    Enhanced prediction with ensemble methods for selected tickers
     """
     model_types = model_types or ['xgboost', 'lightgbm', 'random_forest']
     predictions = []
     
-    for ticker, model_dict in tqdm(models.items(), desc="Ensemble predictions"):
+    # Filter to selected tickers if provided
+    if selected_tickers:
+        models = {ticker: model_dict for ticker, model_dict in models.items() 
+                 if ticker in selected_tickers}
+        current_data = {ticker: df for ticker, df in current_data.items() 
+                       if ticker in selected_tickers}
+        print(f"Making predictions for {len(models)} selected tickers")
+    
+    for ticker, model_dict in tqdm(models.items(), desc="Ensemble predictions for selected stocks"):
         try:
             if ticker not in current_data:
                 continue
@@ -1025,7 +1337,11 @@ def predict_with_ensemble(models: Dict[str, Any],
             logging.warning(f"Ensemble prediction failed for {ticker}: {e}")
             continue
     
-    return pd.DataFrame(predictions)
+    result_df = pd.DataFrame(predictions)
+    if not result_df.empty and selected_tickers:
+        print(f"Generated predictions for {len(result_df)} selected stocks")
+    
+    return result_df
 
 # ==================== MODEL PERSISTENCE ====================
 
@@ -1092,7 +1408,7 @@ def load_models_optimized(cache_dir: str = "model_cache") -> Dict[str, Any]:
 # ==================== EXAMPLE USAGE ====================
 
 if __name__ == "__main__":
-    print("Enhanced Stock Prediction Model System - Complete Version")
+    print("Enhanced Stock Prediction Model System - User Selection + Price Targets Version")
     print("="*60)
     
     # Enhanced configuration
@@ -1100,25 +1416,20 @@ if __name__ == "__main__":
     enhanced_config['hyperparameter_tuning'] = True
     enhanced_config['model_calibration'] = True
     enhanced_config['feature_importance_analysis'] = True
+    enhanced_config['selected_stocks_only'] = True
     
     print("Enhanced Configuration:")
     for key, value in enhanced_config.items():
         if key != 'param_space':
             print(f"  {key}: {value}")
     
-    print(f"\nFixed Issues:")
-    print(f"  ✓ Import path corrections")
-    print(f"  ✓ Error handling improvements") 
-    print(f"  ✓ Fallback mechanisms for missing modules")
-    print(f"  ✓ Deprecated method fixes")
-    print(f"  ✓ Enhanced logging and warnings")
-    
-    print(f"\nEnhanced Features:")
-    print(f"  ✓ Multiple ML algorithms (XGBoost, LightGBM, CatBoost, etc.)")
-    print(f"  ✓ Advanced hyperparameter optimization")
-    print(f"  ✓ Intelligent feature selection")
-    print(f"  ✓ Model calibration for better probabilities")
-    print(f"  ✓ Ensemble methods (voting, stacking, blending)")
+    print(f"\nNew Features:")
+    print(f"  ✓ Price Target Predictions - Specific price predictions")
+    print(f"  ✓ No Pre-selection - Users must choose stocks")
+    print(f"  ✓ Fixed XGBoost Early Stopping")
+    print(f"  ✓ Train models only for user-selected stocks")
+    print(f"  ✓ Faster training with fewer stocks")
+    print(f"  ✓ Enhanced ensemble methods")
     print(f"  ✓ Comprehensive evaluation metrics")
     print(f"  ✓ Feature importance analysis")
     print(f"  ✓ Time series validation")

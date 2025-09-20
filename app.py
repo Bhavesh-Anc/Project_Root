@@ -1,4 +1,4 @@
-# app_complete.py
+# app.py - Complete Updated Version with Backtesting Integration
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -30,6 +30,8 @@ try:
     from utils.model import (
         train_models_enhanced_parallel, 
         predict_with_ensemble,
+        generate_price_targets_for_selected_stocks,
+        predict_with_ensemble_and_targets,
         ENHANCED_MODEL_CONFIG,
         save_models_optimized,
         load_models_optimized
@@ -38,13 +40,24 @@ except ImportError as e:
     st.error(f"Model import failed: {e}")
     st.stop()
 
+# Import backtesting framework
+try:
+    from utils.backtesting import (
+        BacktestEngine, BacktestConfig, MLStrategy, 
+        BacktestAnalyzer, BacktestDB, PerformanceMetrics
+    )
+    BACKTESTING_AVAILABLE = True
+except ImportError as e:
+    st.warning(f"Backtesting framework not available: {e}")
+    BACKTESTING_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 warnings.filterwarnings('ignore')
 
 # Enhanced Streamlit page configuration
 st.set_page_config(
-    page_title="AI Stock Advisor Pro - Enhanced",
+    page_title="AI Stock Advisor Pro - Complete",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -108,13 +121,153 @@ st.markdown("""
     .stProgress .st-bo {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     }
+    .backtest-container {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# Enhanced caching system
-@st.cache_data(ttl=1800, max_entries=3, show_spinner="Loading cached data...")
-def load_comprehensive_data(max_tickers: int = None):
-    """Load comprehensive stock data with enhanced features"""
+# ==================== STOCK SELECTION INTERFACE ====================
+
+def create_stock_selection_interface():
+    """Create stock selection interface with no pre-selection"""
+    
+    st.sidebar.header("🎯 Stock Selection")
+    
+    # Available tickers
+    available_tickers = [
+        "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "HINDUNILVR.NS",
+        "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS", "BHARTIARTL.NS", "LT.NS",
+        "HDFC.NS", "ITC.NS", "ASIANPAINT.NS", "MARUTI.NS", "AXISBANK.NS",
+        "BAJFINANCE.NS", "WIPRO.NS", "ONGC.NS", "SUNPHARMA.NS", "NESTLEIND.NS",
+        "HCLTECH.NS", "ULTRACEMCO.NS", "POWERGRID.NS", "NTPC.NS", "TECHM.NS",
+        "TATAMOTORS.NS", "BAJAJFINSV.NS", "COALINDIA.NS", "INDUSINDBK.NS", "CIPLA.NS",
+        "DRREDDY.NS", "EICHERMOT.NS", "GRASIM.NS", "HEROMOTOCO.NS", "HINDALCO.NS",
+        "IOC.NS", "JSWSTEEL.NS", "M&M.NS", "BRITANNIA.NS", "DIVISLAB.NS",
+        "ADANIPORTS.NS", "APOLLOHOSP.NS", "BAJAJ-AUTO.NS", "BPCL.NS", "SHREECEM.NS",
+        "TATASTEEL.NS", "TITAN.NS", "UPL.NS", "VEDL.NS", "TATACONSUM.NS"
+    ]
+    
+    # Stock selection - START WITH EMPTY LIST
+    selected_tickers = st.sidebar.multiselect(
+        "Choose Stocks for Analysis:",
+        options=available_tickers,
+        default=[],  # NO PRE-SELECTION
+        help="Select stocks you want to analyze. Start by choosing 3-5 stocks."
+    )
+    
+    # Quick selection buttons
+    st.sidebar.markdown("**Quick Selection:**")
+    
+    col1, col2 = st.sidebar.columns(2)
+    
+    with col1:
+        if st.button("🏦 Banking"):
+            selected_tickers = ["HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS", "AXISBANK.NS"]
+            st.rerun()
+    
+    with col2:
+        if st.button("💻 Tech"):
+            selected_tickers = ["TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS", "TECHM.NS"]
+            st.rerun()
+    
+    col3, col4 = st.sidebar.columns(2)
+    
+    with col3:
+        if st.button("🏭 Industrial"):
+            selected_tickers = ["RELIANCE.NS", "LT.NS", "TATAMOTORS.NS", "M&M.NS", "TATASTEEL.NS"]
+            st.rerun()
+    
+    with col4:
+        if st.button("🛒 FMCG"):
+            selected_tickers = ["HINDUNILVR.NS", "ITC.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TATACONSUM.NS"]
+            st.rerun()
+    
+    # Show selection summary
+    if selected_tickers:
+        st.sidebar.success(f"✅ {len(selected_tickers)} stocks selected")
+        with st.sidebar.expander("Selected Stocks"):
+            for ticker in selected_tickers:
+                st.write(f"• {ticker}")
+    else:
+        st.sidebar.info("👆 Please select stocks to analyze")
+        st.sidebar.markdown("""
+        **Getting Started:**
+        1. Choose 3-5 stocks from the list above
+        2. Or use Quick Selection buttons
+        3. Click 'Generate Analysis' when ready
+        """)
+    
+    return selected_tickers
+
+def show_welcome_screen():
+    """Show welcome screen when no stocks are selected"""
+    
+    st.markdown("""
+    <div style='text-align: center; padding: 3rem;'>
+        <h2>🎯 Welcome to AI Stock Advisor Pro</h2>
+        <p style='font-size: 1.2rem; color: #666; margin: 2rem 0;'>
+            Get started by selecting stocks you want to analyze
+        </p>
+        
+        <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 2rem; margin: 2rem 0;'>
+            
+            <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                        color: white; padding: 2rem; border-radius: 15px; text-align: center;'>
+                <h3>🏦 Banking Sector</h3>
+                <p>Analyze leading banks like HDFC, ICICI, and SBI</p>
+            </div>
+            
+            <div style='background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
+                        color: white; padding: 2rem; border-radius: 15px; text-align: center;'>
+                <h3>💻 Technology</h3>
+                <p>Explore IT giants like TCS, Infosys, and Wipro</p>
+            </div>
+            
+            <div style='background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); 
+                        color: white; padding: 2rem; border-radius: 15px; text-align: center;'>
+                <h3>🏭 Industrial</h3>
+                <p>Industrial leaders like Reliance, L&T, and Tata Motors</p>
+            </div>
+            
+            <div style='background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); 
+                        color: white; padding: 2rem; border-radius: 15px; text-align: center;'>
+                <h3>🛒 FMCG</h3>
+                <p>Consumer goods like HUL, ITC, and Britannia</p>
+            </div>
+            
+        </div>
+        
+        <div style='background: #f8f9fa; padding: 2rem; border-radius: 10px; margin: 2rem 0;'>
+            <h3>📊 What You'll Get:</h3>
+            <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-top: 1rem;'>
+                <div>💰 <strong>Price Targets</strong><br>Specific price predictions</div>
+                <div>📈 <strong>Technical Analysis</strong><br>200+ advanced features</div>
+                <div>🤖 <strong>AI Predictions</strong><br>Ensemble ML models</div>
+                <div>📊 <strong>Risk Assessment</strong><br>Comprehensive risk metrics</div>
+                <div>🔬 <strong>Backtesting</strong><br>Historical strategy validation</div>
+                <div>💼 <strong>Portfolio Optimization</strong><br>Advanced portfolio construction</div>
+            </div>
+        </div>
+        
+        <p style='color: #666; margin-top: 2rem;'>
+            👈 Use the sidebar to select stocks and get started
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# ==================== ENHANCED CACHING SYSTEM ====================
+
+@st.cache_data(ttl=1800, max_entries=3, show_spinner="Loading data for selected stocks...")
+def load_comprehensive_data_filtered(selected_tickers: list, max_tickers: int = None):
+    """Load comprehensive stock data for selected tickers only"""
+    
+    if not selected_tickers:
+        return {}, {}
     
     # Enhanced configuration
     enhanced_data_config = DATA_CONFIG.copy()
@@ -122,19 +275,20 @@ def load_comprehensive_data(max_tickers: int = None):
     enhanced_data_config['use_database'] = True
     enhanced_data_config['validate_data'] = True
     
-    with st.spinner("Fetching comprehensive stock data..."):
+    with st.spinner(f"Fetching data for {len(selected_tickers)} selected stocks..."):
         try:
+            # Pass selected tickers to data loader
             raw_data = get_comprehensive_stock_data(
-                tickers=None, 
+                tickers=selected_tickers,  # Only selected tickers
                 config=enhanced_data_config, 
-                max_tickers=max_tickers
+                max_tickers=len(selected_tickers)
             )
         except Exception as e:
             st.error(f"Failed to fetch stock data: {e}")
             return {}, {}
     
     if not raw_data:
-        st.error("Failed to fetch stock data")
+        st.error("Failed to fetch stock data for selected stocks")
         return {}, {}
     
     # Enhanced feature engineering
@@ -142,7 +296,7 @@ def load_comprehensive_data(max_tickers: int = None):
     enhanced_feature_config['advanced_features'] = True
     enhanced_feature_config['cache_features'] = True
     
-    with st.spinner("Engineering advanced features..."):
+    with st.spinner(f"Engineering features for {len(selected_tickers)} stocks..."):
         try:
             featured_data = engineer_features_enhanced(
                 raw_data, 
@@ -156,18 +310,22 @@ def load_comprehensive_data(max_tickers: int = None):
     
     return raw_data, featured_data
 
-@st.cache_data(ttl=3600, show_spinner="Loading/Training ML models...")
-def load_or_train_enhanced_models(featured_data, force_retrain=False):
-    """Load or train enhanced ML models"""
+@st.cache_data(ttl=3600, show_spinner="Training models for selected stocks...")
+def load_or_train_enhanced_models_filtered(featured_data, force_retrain=False, selected_tickers=None):
+    """Load or train enhanced ML models for selected stocks only"""
     
     if not force_retrain:
         try:
             existing_models = load_models_optimized()
-            if existing_models:
-                st.success("✅ Loaded existing enhanced models")
-                return existing_models, {"loaded_from_cache": True, "model_count": len(existing_models)}
+            # Filter to selected tickers
+            if existing_models and selected_tickers:
+                filtered_models = {ticker: models for ticker, models in existing_models.items() 
+                                 if ticker in selected_tickers}
+                if filtered_models:
+                    st.success(f"✅ Loaded existing models for {len(filtered_models)} selected stocks")
+                    return filtered_models, {"loaded_from_cache": True, "model_count": len(filtered_models)}
         except Exception as e:
-            st.info(f"ℹ️ No existing models found. Training new enhanced models... ({e})")
+            st.info(f"ℹ️ Training new models for selected stocks... ({e})")
     
     # Enhanced model configuration
     enhanced_config = ENHANCED_MODEL_CONFIG.copy()
@@ -175,18 +333,18 @@ def load_or_train_enhanced_models(featured_data, force_retrain=False):
     enhanced_config['model_calibration'] = True
     enhanced_config['feature_importance_analysis'] = True
     enhanced_config['model_types'] = ['xgboost', 'lightgbm', 'random_forest']
+    enhanced_config['selected_stocks_only'] = True
     
-    # Adjust based on data size
-    total_tickers = len(featured_data)
-    if total_tickers > 50:
-        enhanced_config['batch_size'] = 6
-        enhanced_config['feature_selection_top_k'] = 75
+    st.info(f"🚀 Training models for {len(selected_tickers)} selected stocks...")
     
-    st.info(f"🚀 Training enhanced models for {total_tickers} tickers...")
-    
-    with st.spinner("🧠 Training advanced ML models..."):
+    with st.spinner("🧠 Training advanced ML models for selected stocks..."):
         try:
-            results = train_models_enhanced_parallel(featured_data, enhanced_config)
+            # Use updated training function with selected tickers
+            results = train_models_enhanced_parallel(
+                featured_data, 
+                enhanced_config, 
+                selected_tickers  # Pass selected tickers
+            )
         except Exception as e:
             st.error(f"Model training failed: {e}")
             return {}, {"training_failed": True, "error": str(e)}
@@ -194,13 +352,749 @@ def load_or_train_enhanced_models(featured_data, force_retrain=False):
     if results['models']:
         try:
             save_models_optimized(results['models'])
-            st.success(f"✅ Enhanced training completed! Success rate: {results['training_summary']['success_rate']:.1%}")
+            st.success(f"✅ Training completed for selected stocks! Success rate: {results['training_summary']['success_rate']:.1%}")
         except Exception as e:
             st.warning(f"Model saving failed: {e}")
     else:
-        st.error("❌ Enhanced model training failed")
+        st.error("❌ Enhanced model training failed for selected stocks")
     
     return results['models'], results['training_summary']
+
+# ==================== BACKTESTING INTERFACE ====================
+
+def create_backtesting_tab(models, featured_data, raw_data):
+    """Create backtesting interface in Streamlit"""
+    
+    st.header("🔬 Advanced Backtesting & Strategy Validation")
+    
+    if not BACKTESTING_AVAILABLE:
+        st.error("Backtesting framework is not available. Please check the installation.")
+        return
+    
+    # Configuration section
+    st.subheader("⚙️ Backtest Configuration")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        initial_capital = st.number_input(
+            "Initial Capital (₹)", 
+            min_value=100000, 
+            max_value=50000000, 
+            value=1000000,
+            step=100000
+        )
+        
+        transaction_cost = st.slider(
+            "Transaction Cost (%)", 
+            min_value=0.01, 
+            max_value=0.5, 
+            value=0.1,
+            step=0.01
+        ) / 100
+        
+        slippage = st.slider(
+            "Slippage (%)", 
+            min_value=0.01, 
+            max_value=0.2, 
+            value=0.05,
+            step=0.01
+        ) / 100
+    
+    with col2:
+        max_positions = st.slider("Max Positions", 5, 25, 10)
+        
+        rebalance_freq = st.selectbox(
+            "Rebalancing Frequency",
+            ["weekly", "monthly", "quarterly"],
+            index=1
+        )
+        
+        position_sizing = st.selectbox(
+            "Position Sizing Method",
+            ["equal_weight", "risk_parity", "kelly"],
+            index=0
+        )
+    
+    with col3:
+        max_drawdown_limit = st.slider(
+            "Max Drawdown Limit (%)", 
+            min_value=5, 
+            max_value=30, 
+            value=15
+        ) / 100
+        
+        investment_horizon = st.selectbox(
+            "ML Model Horizon",
+            ["next_week", "next_month", "next_quarter"],
+            index=1
+        )
+        
+        risk_free_rate = st.slider(
+            "Risk-Free Rate (%)", 
+            min_value=3, 
+            max_value=10, 
+            value=6
+        ) / 100
+    
+    # Date range selection
+    st.subheader("📅 Backtest Period")
+    
+    # Get available date range from data
+    if raw_data:
+        all_dates = []
+        for ticker_data in raw_data.values():
+            all_dates.extend(ticker_data.index)
+        
+        min_date = min(all_dates)
+        max_date = max(all_dates)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            start_date = st.date_input(
+                "Start Date",
+                value=max(min_date, max_date - timedelta(days=730)),  # Default: 2 years
+                min_value=min_date,
+                max_value=max_date
+            )
+        
+        with col2:
+            end_date = st.date_input(
+                "End Date",
+                value=max_date - timedelta(days=30),  # Leave some buffer
+                min_value=min_date,
+                max_value=max_date
+            )
+        
+        if start_date >= end_date:
+            st.error("Start date must be before end date")
+            return
+    else:
+        st.error("No data available for backtesting")
+        return
+    
+    # Advanced settings
+    with st.expander("🔧 Advanced Settings"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            min_signal_strength = st.slider(
+                "Minimum Signal Strength", 
+                0.5, 0.9, 0.6, 0.05
+            )
+            profit_target = st.slider(
+                "Profit Target (%)", 
+                5, 30, 10
+            ) / 100
+        
+        with col2:
+            stop_loss = st.slider(
+                "Stop Loss (%)", 
+                2, 15, 5
+            ) / 100
+            max_holding_days = st.slider(
+                "Max Holding Period (days)", 
+                10, 90, 30
+            )
+    
+    # Run backtest button
+    if st.button("🚀 Run Backtest", type="primary"):
+        
+        if not models or not featured_data:
+            st.error("No trained models available. Please train models first.")
+            return
+        
+        # Create configuration
+        config = BacktestConfig(
+            initial_capital=initial_capital,
+            transaction_cost_pct=transaction_cost,
+            slippage_pct=slippage,
+            max_positions=max_positions,
+            rebalance_frequency=rebalance_freq,
+            position_sizing_method=position_sizing,
+            max_drawdown_limit=max_drawdown_limit,
+            risk_free_rate=risk_free_rate
+        )
+        
+        # Create ML strategy with enhanced exit rules
+        class EnhancedMLStrategy(MLStrategy):
+            def __init__(self, models, featured_data, horizon, min_signal, profit_target, stop_loss, max_days):
+                super().__init__(models, featured_data, horizon)
+                self.min_signal_strength = min_signal
+                self.profit_target = profit_target
+                self.stop_loss = stop_loss
+                self.max_holding_days = max_days
+            
+            def generate_signals(self, data, date):
+                signals = super().generate_signals(data, date)
+                # Filter by minimum signal strength
+                return {k: v for k, v in signals.items() if v >= self.min_signal_strength}
+            
+            def should_exit(self, ticker, entry_date, current_date, current_price, entry_price):
+                # Enhanced exit logic
+                holding_period = (current_date - entry_date).days
+                return_pct = (current_price - entry_price) / entry_price
+                
+                # Time-based exit
+                if holding_period > self.max_holding_days:
+                    return True
+                
+                # Profit target
+                if return_pct > self.profit_target:
+                    return True
+                
+                # Stop loss
+                if return_pct < -self.stop_loss:
+                    return True
+                
+                return False
+        
+        strategy = EnhancedMLStrategy(
+            models, featured_data, investment_horizon,
+            min_signal_strength, profit_target, stop_loss, max_holding_days
+        )
+        
+        # Initialize and run backtest
+        with st.spinner("Running backtest... This may take a few minutes."):
+            try:
+                engine = BacktestEngine(config)
+                
+                results = engine.run_backtest(
+                    strategy=strategy,
+                    data=raw_data,
+                    start_date=datetime.combine(start_date, datetime.min.time()),
+                    end_date=datetime.combine(end_date, datetime.min.time())
+                )
+                
+                if 'error' in results:
+                    st.error(f"Backtest failed: {results['error']}")
+                    return
+                
+                # Display results
+                display_backtest_results(results, config)
+                
+                # Save results
+                db = BacktestDB()
+                backtest_name = f"ML_Strategy_{datetime.now().strftime('%Y%m%d_%H%M')}"
+                backtest_id = db.save_backtest(backtest_name, results)
+                
+                st.success(f"Backtest completed and saved with ID: {backtest_id}")
+                
+            except Exception as e:
+                st.error(f"Backtest execution failed: {str(e)}")
+                st.exception(e)
+    
+    # Historical backtests section
+    st.subheader("📊 Historical Backtests")
+    
+    try:
+        db = BacktestDB()
+        historical_backtests = db.list_backtests()
+        
+        if not historical_backtests.empty:
+            # Display table of historical backtests
+            display_cols = ['name', 'initial_capital', 'final_value', 'total_return', 
+                          'sharpe_ratio', 'max_drawdown', 'total_trades', 'win_rate']
+            
+            formatted_df = historical_backtests[display_cols].copy()
+            
+            # Format columns for display
+            formatted_df['total_return'] = formatted_df['total_return'].apply(lambda x: f"{x:.2%}")
+            formatted_df['sharpe_ratio'] = formatted_df['sharpe_ratio'].apply(lambda x: f"{x:.3f}")
+            formatted_df['max_drawdown'] = formatted_df['max_drawdown'].apply(lambda x: f"{x:.2%}")
+            formatted_df['win_rate'] = formatted_df['win_rate'].apply(lambda x: f"{x:.2%}")
+            
+            st.dataframe(formatted_df, use_container_width=True)
+            
+            # Load and compare specific backtests
+            selected_backtests = st.multiselect(
+                "Select backtests to compare:",
+                options=historical_backtests['id'].tolist(),
+                format_func=lambda x: f"ID {x}: {historical_backtests[historical_backtests['id']==x]['name'].iloc[0]}"
+            )
+            
+            if selected_backtests and st.button("Compare Selected Backtests"):
+                compare_backtests(selected_backtests, db)
+                
+        else:
+            st.info("No historical backtests found. Run your first backtest above!")
+            
+    except Exception as e:
+        st.warning(f"Could not load historical backtests: {e}")
+
+def display_backtest_results(results, config):
+    """Display comprehensive backtest results"""
+    
+    metrics = results['metrics']
+    portfolio_df = results['portfolio_history']
+    trades = results['trades']
+    
+    # Key metrics overview
+    st.subheader("📈 Performance Summary")
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        st.metric(
+            "Total Return", 
+            f"{metrics['total_return']:.2%}",
+            delta=f"vs {config.risk_free_rate:.1%} risk-free"
+        )
+    
+    with col2:
+        st.metric("Sharpe Ratio", f"{metrics['sharpe_ratio']:.3f}")
+    
+    with col3:
+        st.metric("Max Drawdown", f"{metrics['max_drawdown']:.2%}")
+    
+    with col4:
+        st.metric("Total Trades", f"{metrics['total_trades']}")
+    
+    with col5:
+        st.metric("Win Rate", f"{metrics['win_rate']:.1%}")
+    
+    # Performance charts
+    st.subheader("📊 Performance Analysis")
+    
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Portfolio Value", "Drawdown", "Returns Distribution", "Trade Analysis"
+    ])
+    
+    with tab1:
+        # Portfolio value over time
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=portfolio_df.index,
+            y=portfolio_df['portfolio_value'],
+            mode='lines',
+            name='Portfolio Value',
+            line=dict(color='blue', width=2)
+        ))
+        
+        # Add benchmark if available
+        initial_value = config.initial_capital
+        benchmark_value = initial_value * (1 + config.risk_free_rate) ** (
+            (portfolio_df.index - portfolio_df.index[0]).days / 365.25
+        )
+        
+        fig.add_trace(go.Scatter(
+            x=portfolio_df.index,
+            y=benchmark_value,
+            mode='lines',
+            name=f'Risk-Free Rate ({config.risk_free_rate:.1%})',
+            line=dict(color='gray', dash='dash')
+        ))
+        
+        fig.update_layout(
+            title="Portfolio Value Over Time",
+            xaxis_title="Date",
+            yaxis_title="Portfolio Value (₹)",
+            height=500
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with tab2:
+        # Drawdown chart
+        peak = portfolio_df['portfolio_value'].cummax()
+        drawdown = (portfolio_df['portfolio_value'] - peak) / peak * 100
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=portfolio_df.index,
+            y=drawdown,
+            fill='tonexty',
+            mode='lines',
+            name='Drawdown',
+            line=dict(color='red'),
+            fillcolor='rgba(255,0,0,0.3)'
+        ))
+        
+        fig.add_hline(
+            y=-config.max_drawdown_limit * 100,
+            line_dash="dash",
+            line_color="red",
+            annotation_text=f"Max Drawdown Limit ({config.max_drawdown_limit:.1%})"
+        )
+        
+        fig.update_layout(
+            title="Portfolio Drawdown",
+            xaxis_title="Date",
+            yaxis_title="Drawdown (%)",
+            height=400
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with tab3:
+        # Returns distribution
+        if 'returns' in results:
+            returns = results['returns'] * 100  # Convert to percentage
+            
+            fig = go.Figure()
+            
+            fig.add_trace(go.Histogram(
+                x=returns,
+                nbinsx=50,
+                name='Daily Returns',
+                opacity=0.7
+            ))
+            
+            fig.add_vline(
+                x=returns.mean(),
+                line_dash="dash",
+                line_color="red",
+                annotation_text=f"Mean: {returns.mean():.3f}%"
+            )
+            
+            fig.update_layout(
+                title="Daily Returns Distribution",
+                xaxis_title="Daily Return (%)",
+                yaxis_title="Frequency",
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Risk metrics
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("VaR (95%)", f"{metrics['var_95']:.2%}")
+            with col2:
+                st.metric("CVaR (95%)", f"{metrics['cvar_95']:.2%}")
+            with col3:
+                st.metric("Volatility", f"{metrics['volatility']:.2%}")
+    
+    with tab4:
+        # Trade analysis
+        if trades:
+            trade_df = pd.DataFrame([{
+                'Ticker': trade.ticker,
+                'Entry Date': trade.entry_date,
+                'Exit Date': trade.exit_date,
+                'Holding Days': trade.holding_period,
+                'Entry Price': trade.entry_price,
+                'Exit Price': trade.exit_price,
+                'Return %': trade.return_pct * 100,
+                'P&L (₹)': trade.net_pnl,
+                'Entry Signal': trade.entry_signal
+            } for trade in trades])
+            
+            # Trade statistics
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Avg Trade Return", f"{metrics.get('avg_trade_return', 0):.2%}")
+            with col2:
+                st.metric("Best Trade", f"₹{metrics.get('best_trade', 0):,.0f}")
+            with col3:
+                st.metric("Worst Trade", f"₹{metrics.get('worst_trade', 0):,.0f}")
+            with col4:
+                st.metric("Avg Duration", f"{metrics['avg_trade_duration']:.1f} days")
+            
+            # Trade table
+            st.subheader("Individual Trades")
+            
+            # Format the dataframe for display
+            display_df = trade_df.copy()
+            display_df['Return %'] = display_df['Return %'].apply(lambda x: f"{x:.2f}%")
+            display_df['P&L (₹)'] = display_df['P&L (₹)'].apply(lambda x: f"₹{x:,.0f}")
+            display_df['Entry Price'] = display_df['Entry Price'].apply(lambda x: f"₹{x:.2f}")
+            display_df['Exit Price'] = display_df['Exit Price'].apply(lambda x: f"₹{x:.2f}")
+            
+            st.dataframe(display_df, use_container_width=True)
+            
+            # Trade returns distribution
+            fig = go.Figure()
+            
+            fig.add_trace(go.Histogram(
+                x=trade_df['Return %'],
+                nbinsx=30,
+                name='Trade Returns',
+                opacity=0.7
+            ))
+            
+            fig.update_layout(
+                title="Trade Returns Distribution",
+                xaxis_title="Return (%)",
+                yaxis_title="Number of Trades",
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        else:
+            st.info("No trades executed during backtest period.")
+    
+    # Detailed performance report
+    with st.expander("📋 Detailed Performance Report"):
+        analyzer = BacktestAnalyzer()
+        report = analyzer.create_performance_report(results)
+        st.text(report)
+
+def compare_backtests(backtest_ids, db):
+    """Compare multiple backtests"""
+    
+    st.subheader("📊 Backtest Comparison")
+    
+    comparison_data = []
+    portfolio_data = {}
+    
+    for backtest_id in backtest_ids:
+        try:
+            results = db.load_backtest(backtest_id)
+            if results:
+                metrics = results['metrics']
+                portfolio_df = results['portfolio_history']
+                
+                comparison_data.append({
+                    'Backtest ID': backtest_id,
+                    'Total Return': f"{metrics['total_return']:.2%}",
+                    'Annual Return': f"{metrics['annual_return']:.2%}",
+                    'Sharpe Ratio': f"{metrics['sharpe_ratio']:.3f}",
+                    'Max Drawdown': f"{metrics['max_drawdown']:.2%}",
+                    'Win Rate': f"{metrics['win_rate']:.1%}",
+                    'Total Trades': metrics['total_trades']
+                })
+                
+                # Normalize portfolio values for comparison
+                normalized_portfolio = portfolio_df['portfolio_value'] / portfolio_df['portfolio_value'].iloc[0]
+                portfolio_data[f"Backtest {backtest_id}"] = normalized_portfolio
+                
+        except Exception as e:
+            st.error(f"Could not load backtest {backtest_id}: {e}")
+    
+    if comparison_data:
+        # Comparison table
+        comparison_df = pd.DataFrame(comparison_data)
+        st.dataframe(comparison_df, use_container_width=True)
+        
+        # Portfolio comparison chart
+        if portfolio_data:
+            fig = go.Figure()
+            
+            for name, portfolio_values in portfolio_data.items():
+                fig.add_trace(go.Scatter(
+                    x=portfolio_values.index,
+                    y=portfolio_values,
+                    mode='lines',
+                    name=name,
+                    line=dict(width=2)
+                ))
+            
+            fig.update_layout(
+                title="Normalized Portfolio Performance Comparison",
+                xaxis_title="Date",
+                yaxis_title="Normalized Portfolio Value",
+                height=500
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+
+# ==================== PRICE TARGETS DASHBOARD ====================
+
+def create_price_targets_dashboard(price_targets_df, predictions_df=None):
+    """Create comprehensive price targets dashboard"""
+    
+    if price_targets_df.empty:
+        st.warning("⚠️ No price targets available. Please ensure you have:")
+        st.markdown("""
+        - Selected stocks in the sidebar
+        - Generated predictions in the Enhanced Predictions tab
+        - Trained models for the selected horizon
+        """)
+        return
+    
+    st.subheader("💰 AI-Generated Price Targets")
+    
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        avg_return = price_targets_df['percentage_change'].mean()
+        st.metric("Average Expected Return", f"{avg_return:.1f}%")
+    
+    with col2:
+        bullish_count = len(price_targets_df[price_targets_df['percentage_change'] > 0])
+        st.metric("Bullish Targets", f"{bullish_count}/{len(price_targets_df)}")
+    
+    with col3:
+        high_confidence = len(price_targets_df[price_targets_df['confidence_level'] > 0.7])
+        st.metric("High Confidence", f"{high_confidence}")
+    
+    with col4:
+        low_risk = len(price_targets_df[price_targets_df['risk_level'].isin(['Low', 'Medium'])])
+        st.metric("Low-Medium Risk", f"{low_risk}")
+    
+    # Detailed price targets table
+    st.subheader("📊 Detailed Price Targets")
+    
+    for i, (_, row) in enumerate(price_targets_df.iterrows()):
+        with st.container():
+            # Header row
+            col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
+            
+            with col1:
+                # Trend arrow based on prediction
+                arrow = "📈" if row['percentage_change'] > 0 else "📉"
+                st.markdown(f"### {arrow} **{row['ticker']}**")
+                st.caption(f"Horizon: {row['horizon']} ({row['horizon_days']} days)")
+            
+            with col2:
+                st.markdown(f"**Current Price**: ₹{row['current_price']:,.0f}")
+                st.markdown(f"**Target Price**: ₹{row['target_price']:,.0f}")
+            
+            with col3:
+                change_color = "green" if row['percentage_change'] > 0 else "red"
+                st.markdown(f"**Expected Return**: <span style='color: {change_color}; font-weight: bold;'>{row['percentage_change']:+.1f}%</span>", 
+                           unsafe_allow_html=True)
+                st.markdown(f"**Price Change**: ₹{row['price_change']:+,.0f}")
+            
+            with col4:
+                # Risk color coding
+                risk_colors = {"Low": "green", "Medium": "orange", "High": "red", "Very High": "darkred"}
+                risk_color = risk_colors.get(row['risk_level'], "gray")
+                st.markdown(f"**Risk**: <span style='color: {risk_color};'>{row['risk_level']}</span>", 
+                           unsafe_allow_html=True)
+                st.caption(f"Confidence: {row['confidence_level']:.0%}")
+            
+            # Detailed metrics row
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("**📊 Target Scenarios:**")
+                st.markdown(f"• Conservative: ₹{row['targets']['conservative']:,.0f}")
+                st.markdown(f"• Moderate: ₹{row['targets']['moderate']:,.0f}")
+                st.markdown(f"• Aggressive: ₹{row['targets']['aggressive']:,.0f}")
+            
+            with col2:
+                st.markdown("**📈 Technical Levels:**")
+                st.markdown(f"• Support: ₹{row['support_resistance']['support']:,.0f}")
+                st.markdown(f"• Resistance: ₹{row['support_resistance']['resistance']:,.0f}")
+                st.markdown(f"• Probability: {row['direction_probability']:.0%}")
+            
+            with col3:
+                # Quick action recommendation
+                if row['percentage_change'] > 5 and row['risk_level'] in ['Low', 'Medium']:
+                    action = "🟢 **STRONG BUY**"
+                    action_color = "green"
+                elif row['percentage_change'] > 0 and row['confidence_level'] > 0.6:
+                    action = "🟡 **BUY**"
+                    action_color = "orange"
+                elif row['percentage_change'] < -3:
+                    action = "🔴 **SELL**"
+                    action_color = "red"
+                else:
+                    action = "⚪ **HOLD**"
+                    action_color = "gray"
+                
+                st.markdown("**🎯 Recommendation:**")
+                st.markdown(f"<span style='color: {action_color}; font-weight: bold; font-size: 1.1em;'>{action}</span>", 
+                           unsafe_allow_html=True)
+                
+                # Investment amount example
+                st.caption(f"₹1L → ₹{100000 * (1 + row['percentage_change']/100):,.0f}")
+            
+            st.markdown("---")
+    
+    # Price targets visualization
+    st.subheader("📈 Price Targets Visualization")
+    
+    # Create tabs for different views
+    tab1, tab2, tab3 = st.tabs(["🎯 Target vs Current", "📊 Expected Returns", "⚖️ Risk vs Return"])
+    
+    with tab1:
+        # Price targets comparison chart
+        fig = go.Figure()
+        
+        # Current prices
+        fig.add_trace(go.Bar(
+            name='Current Price',
+            x=price_targets_df['ticker'],
+            y=price_targets_df['current_price'],
+            marker_color='lightblue',
+            text=price_targets_df['current_price'].round(0),
+            textposition='auto'
+        ))
+        
+        # Target prices
+        fig.add_trace(go.Bar(
+            name='Target Price',
+            x=price_targets_df['ticker'],
+            y=price_targets_df['target_price'],
+            marker_color=['green' if x > 0 else 'red' for x in price_targets_df['percentage_change']],
+            text=price_targets_df['target_price'].round(0),
+            textposition='auto'
+        ))
+        
+        fig.update_layout(
+            title="Current vs Target Prices",
+            xaxis_title="Stocks",
+            yaxis_title="Price (₹)",
+            barmode='group',
+            height=500
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with tab2:
+        # Expected returns chart
+        fig = px.bar(
+            price_targets_df,
+            x='ticker',
+            y='percentage_change',
+            color='percentage_change',
+            color_continuous_scale=['red', 'yellow', 'green'],
+            title="Expected Returns by Stock",
+            labels={'percentage_change': 'Expected Return (%)', 'ticker': 'Stock'},
+            text='percentage_change'
+        )
+        
+        fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+        fig.update_layout(height=500)
+        fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5)
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with tab3:
+        # Risk vs return scatter plot
+        # Create risk score mapping
+        risk_mapping = {'Low': 1, 'Medium': 2, 'High': 3, 'Very High': 4}
+        price_targets_df_plot = price_targets_df.copy()
+        price_targets_df_plot['risk_score'] = price_targets_df_plot['risk_level'].map(risk_mapping)
+        
+        fig = px.scatter(
+            price_targets_df_plot,
+            x='risk_score',
+            y='percentage_change',
+            size='confidence_level',
+            color='confidence_level',
+            hover_data=['ticker', 'target_price'],
+            title="Risk vs Expected Return Analysis",
+            labels={
+                'risk_score': 'Risk Level',
+                'percentage_change': 'Expected Return (%)',
+                'confidence_level': 'Confidence'
+            },
+            color_continuous_scale='viridis'
+        )
+        
+        # Update x-axis to show risk levels
+        fig.update_xaxes(
+            tickvals=[1, 2, 3, 4],
+            ticktext=['Low', 'Medium', 'High', 'Very High']
+        )
+        
+        fig.update_layout(height=500)
+        fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5)
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+# ==================== ENHANCED PREDICTION DASHBOARD ====================
 
 def create_enhanced_prediction_dashboard(predictions_df, raw_data):
     """Create comprehensive enhanced prediction dashboard"""
@@ -310,153 +1204,8 @@ def create_enhanced_prediction_dashboard(predictions_df, raw_data):
             st.markdown(f"**{row['ticker']}** - {row['success_prob']:.1%}")
             st.caption(f"Confidence: {row['ensemble_confidence']:.1%}")
             st.markdown("---")
-    
-    # Enhanced visualizations
-    st.subheader("📈 Advanced Market Analysis")
-    
-    tab1, tab2, tab3, tab4 = st.tabs(["🏆 Performance Analysis", "⚡ Risk Assessment", "🤖 Model Insights", "📊 Market Overview"])
-    
-    with tab1:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Success probability distribution
-            fig = px.histogram(
-                predictions_df, 
-                x='success_prob', 
-                nbins=25,
-                title="Success Probability Distribution",
-                color_discrete_sequence=['#667eea'],
-                marginal="box"
-            )
-            fig.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                height=400
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            # Ensemble confidence vs success probability
-            fig = px.scatter(
-                predictions_df,
-                x='ensemble_confidence',
-                y='success_prob',
-                color='predicted_return',
-                size='models_used',
-                hover_data=['ticker'],
-                title="Model Confidence vs Success Probability",
-                color_discrete_map={0: '#f5576c', 1: '#56ab2f'}
-            )
-            fig.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                height=400
-            )
-            st.plotly_chart(fig, use_container_width=True)
-    
-    with tab2:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Risk-Return scatter
-            fig = px.scatter(
-                predictions_df,
-                x='risk_score',
-                y='success_prob',
-                color='predicted_return',
-                size='ensemble_confidence',
-                hover_data=['ticker', 'volatility'],
-                title="Risk-Return Analysis",
-                color_discrete_map={0: '#f5576c', 1: '#56ab2f'}
-            )
-            fig.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                height=400
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            # Volatility distribution
-            fig = px.box(
-                predictions_df,
-                y='volatility',
-                color='predicted_return',
-                title="Volatility by Prediction",
-                color_discrete_map={0: '#f5576c', 1: '#56ab2f'}
-            )
-            fig.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                height=400
-            )
-            st.plotly_chart(fig, use_container_width=True)
-    
-    with tab3:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Models used distribution
-            fig = px.histogram(
-                predictions_df,
-                x='models_used',
-                title="Ensemble Model Usage",
-                color_discrete_sequence=['#764ba2']
-            )
-            fig.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                height=400
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            # Model agreement analysis
-            fig = px.scatter(
-                predictions_df,
-                x='model_agreement',
-                y='ensemble_confidence',
-                color='success_prob',
-                size='models_used',
-                title="Model Agreement vs Confidence",
-                color_continuous_scale='viridis'
-            )
-            fig.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                height=400
-            )
-            st.plotly_chart(fig, use_container_width=True)
-    
-    with tab4:
-        # Market sentiment gauge
-        bullish_pct = len(predictions_df[predictions_df['predicted_return'] == 1]) / len(predictions_df)
-        
-        fig = go.Figure(go.Indicator(
-            mode = "gauge+number+delta",
-            value = bullish_pct * 100,
-            domain = {'x': [0, 1], 'y': [0, 1]},
-            title = {'text': "Market Sentiment"},
-            delta = {'reference': 50},
-            gauge = {
-                'axis': {'range': [None, 100]},
-                'bar': {'color': "darkblue"},
-                'steps': [
-                    {'range': [0, 25], 'color': "lightgray"},
-                    {'range': [25, 50], 'color': "gray"},
-                    {'range': [50, 75], 'color': "lightgreen"},
-                    {'range': [75, 100], 'color': "green"}
-                ],
-                'threshold': {
-                    'line': {'color': "red", 'width': 4},
-                    'thickness': 0.75,
-                    'value': 90
-                }
-            }
-        ))
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+
+# ==================== ADVANCED PORTFOLIO OPTIMIZER ====================
 
 def create_advanced_portfolio_optimizer(predictions_df):
     """Create advanced portfolio optimization with modern techniques"""
@@ -621,48 +1370,164 @@ def create_advanced_portfolio_optimizer(predictions_df):
                 
                 # Progress bar for weight
                 st.progress(row['weight'] / max_single_weight)
+
+# ==================== HELPER DASHBOARD FUNCTIONS ====================
+
+def create_model_analytics_dashboard(training_summary, selected_tickers):
+    """Create model analytics dashboard for selected stocks"""
+    
+    if training_summary and 'training_results' in training_summary:
+        # Training performance metrics
+        col1, col2, col3, col4 = st.columns(4)
         
-        # Portfolio visualization
-        st.subheader("Portfolio Visualization")
+        with col1:
+            st.metric("Selected Stocks", len(selected_tickers))
+        with col2:
+            st.metric("Models Trained", training_summary.get('successful', 0))
+        with col3:
+            st.metric("Success Rate", f"{training_summary.get('success_rate', 0):.1%}")
+        with col4:
+            if 'training_results' in training_summary:
+                avg_score = np.mean([r['score'] for r in training_summary['training_results']])
+                st.metric("Avg Model Score", f"{avg_score:.3f}")
+        
+        # Show selected stocks
+        st.subheader("📊 Selected Stocks Analysis")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            # Weight distribution pie chart
-            fig = px.pie(
-                portfolio_df, 
-                values='weight', 
-                names='ticker',
-                title="Portfolio Weight Distribution",
-                color_discrete_sequence=px.colors.qualitative.Set3
-            )
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            st.markdown("**Selected Stocks:**")
+            for ticker in selected_tickers:
+                st.write(f"• {ticker}")
         
         with col2:
-            # Risk-Return scatter for portfolio stocks
-            fig = px.scatter(
-                portfolio_df,
-                x='risk_score',
-                y='success_prob',
-                size='weight',
-                color='ensemble_confidence',
-                hover_data=['ticker'],
-                title="Portfolio Risk-Return Profile",
-                color_continuous_scale='viridis'
-            )
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            if training_summary['training_results']:
+                results_df = pd.DataFrame(training_summary['training_results'])
+                
+                # Model performance by stock
+                fig = px.box(
+                    results_df, 
+                    x='ticker', 
+                    y='score',
+                    title="Model Performance by Selected Stock"
+                )
+                fig.update_xaxes(tickangle=45)
+                st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No training analytics available. Train models to see performance metrics.")
+
+def create_market_intelligence_dashboard(predictions_df, price_targets_df, selected_tickers):
+    """Create market intelligence dashboard for selected stocks"""
+    
+    st.subheader("🔍 Selected Stocks Intelligence")
+    
+    if not predictions_df.empty:
+        # Market overview metrics for selected stocks
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Stocks Analyzed", len(selected_tickers))
+        with col2:
+            bullish_signals = len(predictions_df[predictions_df['predicted_return'] == 1])
+            st.metric("Bullish Signals", f"{bullish_signals}/{len(predictions_df)}")
+        with col3:
+            avg_confidence = predictions_df['ensemble_confidence'].mean()
+            st.metric("Avg Confidence", f"{avg_confidence:.1%}")
+        with col4:
+            high_potential = len(predictions_df[
+                (predictions_df['predicted_return'] == 1) & 
+                (predictions_df['ensemble_confidence'] > 0.7)
+            ])
+            st.metric("High Potential", f"{high_potential}")
+        
+        # Selected stocks performance summary
+        st.subheader("📈 Selected Stocks Summary")
+        
+        summary_data = []
+        for ticker in selected_tickers:
+            pred_data = predictions_df[predictions_df['ticker'] == ticker]
+            target_data = price_targets_df[price_targets_df['ticker'] == ticker] if not price_targets_df.empty else pd.DataFrame()
+            
+            if not pred_data.empty:
+                pred_row = pred_data.iloc[0]
+                target_row = target_data.iloc[0] if not target_data.empty else None
+                
+                summary_data.append({
+                    'Stock': ticker,
+                    'Prediction': '📈 BUY' if pred_row['predicted_return'] == 1 else '📉 SELL',
+                    'Success Prob': f"{pred_row['success_prob']:.1%}",
+                    'Confidence': f"{pred_row['ensemble_confidence']:.1%}",
+                    'Risk Level': pred_row['risk_score'],
+                    'Expected Return': f"{target_row['percentage_change']:+.1f}%" if target_row is not None else "N/A",
+                    'Target Price': f"₹{target_row['target_price']:,.0f}" if target_row is not None else "N/A"
+                })
+        
+        if summary_data:
+            summary_df = pd.DataFrame(summary_data)
+            st.dataframe(summary_df, use_container_width=True)
+    else:
+        st.warning("No intelligence data available for selected stocks.")
+
+def create_enhanced_system_dashboard(models, selected_tickers, training_summary):
+    """Create enhanced system dashboard for selected stocks"""
+    
+    st.subheader("⚙️ System Status for Selected Stocks")
+    
+    # System performance metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Selected Stocks", len(selected_tickers))
+        st.caption("User-selected stocks")
+    with col2:
+        total_models = sum(len(model_dict) for model_dict in models.values()) if models else 0
+        st.metric("Trained Models", total_models)
+        st.caption("ML models ready")
+    with col3:
+        models_per_stock = total_models / len(selected_tickers) if selected_tickers else 0
+        st.metric("Models per Stock", f"{models_per_stock:.1f}")
+        st.caption("Average coverage")
+    with col4:
+        st.metric("System Mode", "Selected Stocks")
+        st.caption("Focused analysis")
+    
+    # System health and monitoring
+    st.subheader("📊 System Health & Performance")
+    
+    health_checks = {
+        "Data Pipeline": "✅ Operational",
+        "Feature Engineering": "✅ Optimal", 
+        "Model Training": "✅ Complete",
+        "Prediction Engine": "✅ Active",
+        "Backtesting System": "✅ Available" if BACKTESTING_AVAILABLE else "❌ Unavailable",
+        "Database": "✅ Connected"
+    }
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        for check, status in list(health_checks.items())[:3]:
+            st.markdown(f"**{check}**: {status}")
+    
+    with col2:
+        for check, status in list(health_checks.items())[3:]:
+            st.markdown(f"**{check}**: {status}")
+
+# ==================== MAIN APPLICATION ====================
 
 def main():
-    """Enhanced main application function"""
+    """Enhanced main application function with user selection, price targets, and backtesting"""
     
     # Enhanced header
-    st.markdown('<div class="main-header">AI Stock Advisor Pro - Enhanced</div>', unsafe_allow_html=True)
-    st.markdown("*Powered by Advanced Machine Learning, Ensemble Methods & 15+ Years of Historical Data*")
+    st.markdown('<div class="main-header">AI Stock Advisor Pro - Complete Edition</div>', unsafe_allow_html=True)
+    st.markdown("*Powered by Advanced Machine Learning, Backtesting Framework & 15+ Years of Historical Data*")
     
-    # Enhanced sidebar
+    # Enhanced sidebar with stock selection
     st.sidebar.header("Enhanced Configuration")
+    
+    # STEP 1: Use the new stock selection interface
+    selected_tickers = create_stock_selection_interface()
     
     # Data and model settings
     with st.sidebar.expander("Data Settings"):
@@ -705,342 +1570,98 @@ def main():
         st.sidebar.info("• Feature Count: 200+ features")
         st.sidebar.info("• Ensemble Power: Multi-model consensus")
         st.sidebar.info("• Historical Data: Up to 20 years")
+        st.sidebar.info("• Backtesting: Full validation framework")
     
-    # Main content with enhanced tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "Enhanced Predictions", 
-        "Advanced Portfolio", 
-        "Model Analytics", 
-        "Market Intelligence",
-        "System Dashboard"
+    # STEP 2: Show welcome screen if no stocks selected
+    if not selected_tickers:
+        show_welcome_screen()
+        return
+    
+    # STEP 3: Update tabs to include Backtesting
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "📈 Enhanced Predictions", 
+        "💰 Price Targets",
+        "💼 Advanced Portfolio",
+        "🔬 Backtesting",  # New backtesting tab
+        "📊 Model Analytics", 
+        "🔍 Market Intelligence",
+        "⚙️ System Dashboard"
     ])
     
     try:
-        # Load enhanced data and models
-        with st.spinner("Initializing enhanced AI system..."):
-            raw_data, featured_data = load_comprehensive_data(max_tickers)
+        # Load enhanced data and models for SELECTED STOCKS ONLY
+        with st.spinner("Initializing enhanced AI system for selected stocks..."):
+            # Filter to selected tickers only
+            raw_data, featured_data = load_comprehensive_data_filtered(selected_tickers, max_tickers)
             
             if not featured_data:
-                st.error("Failed to load stock data. Please check your connection and try again.")
+                st.error("Failed to load stock data for selected stocks. Please check your selection and try again.")
                 return
             
-            models, training_summary = load_or_train_enhanced_models(featured_data, force_retrain)
+            # STEP 4: Use updated training function with selected stocks only
+            models, training_summary = load_or_train_enhanced_models_filtered(
+                featured_data, 
+                force_retrain, 
+                selected_tickers
+            )
         
         if not models:
-            st.error("No trained models available. Please check your data and try again.")
+            st.error("No trained models available for selected stocks. Please check your data and try again.")
             return
         
-        # Generate enhanced predictions
-        with st.spinner("Generating enhanced predictions..."):
+        # STEP 5: Generate enhanced predictions AND price targets
+        with st.spinner("Generating enhanced predictions and price targets..."):
             try:
-                predictions_df = predict_with_ensemble(
+                # Use the new combined function
+                predictions_df, price_targets_df = predict_with_ensemble_and_targets(
                     models, featured_data, investment_horizon, 
-                    model_types, ensemble_method
+                    model_types, ensemble_method, selected_tickers
                 )
             except Exception as e:
                 st.error(f"Prediction generation failed: {e}")
                 predictions_df = pd.DataFrame()
+                price_targets_df = pd.DataFrame()
         
         # Tab 1: Enhanced Predictions Dashboard
         with tab1:
-            st.header("Enhanced Stock Predictions & AI Insights")
+            st.header("📈 Enhanced Stock Predictions & AI Insights")
             if not predictions_df.empty:
                 create_enhanced_prediction_dashboard(predictions_df, raw_data)
             else:
-                st.warning("No predictions available. Please check your model configuration.")
+                st.warning("No predictions available for selected stocks. Please check your model configuration.")
         
-        # Tab 2: Advanced Portfolio Optimization
+        # Tab 2: Price Targets Dashboard
         with tab2:
-            st.header("Advanced Portfolio Optimization")
+            st.header("💰 AI-Generated Price Targets")
+            create_price_targets_dashboard(price_targets_df, predictions_df)
+        
+        # Tab 3: Advanced Portfolio Optimization
+        with tab3:
+            st.header("💼 Advanced Portfolio Optimization")
             if not predictions_df.empty:
                 create_advanced_portfolio_optimizer(predictions_df)
             else:
                 st.warning("No predictions available for portfolio optimization.")
         
-        # Tab 3: Model Analytics & Performance
-        with tab3:
-            st.header("Advanced Model Analytics")
-            
-            if training_summary and 'training_results' in training_summary:
-                # Training performance metrics
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.metric("Models Trained", training_summary.get('successful', 0))
-                with col2:
-                    st.metric("Success Rate", f"{training_summary.get('success_rate', 0):.1%}")
-                with col3:
-                    st.metric("Total Tasks", training_summary.get('total_tasks', 0))
-                with col4:
-                    if 'training_results' in training_summary:
-                        avg_score = np.mean([r['score'] for r in training_summary['training_results']])
-                        st.metric("Avg Model Score", f"{avg_score:.3f}")
-                
-                # Training results analysis
-                if training_summary['training_results']:
-                    results_df = pd.DataFrame(training_summary['training_results'])
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Model performance by type
-                        fig = px.box(
-                            results_df, 
-                            x='model_key', 
-                            y='score',
-                            title="Model Performance Distribution"
-                        )
-                        fig.update_xaxes(tickangle=45)
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    with col2:
-                        # Training time analysis
-                        fig = px.scatter(
-                            results_df,
-                            x='feature_count',
-                            y='training_time',
-                            color='score',
-                            size='score',
-                            title="Training Efficiency Analysis",
-                            color_continuous_scale='viridis'
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No training analytics available. Train models to see performance metrics.")
-        
-        # Tab 4: Market Intelligence
+        # Tab 4: NEW Backtesting Framework
         with tab4:
-            st.header("Advanced Market Intelligence")
-            
-            if not predictions_df.empty:
-                # Market overview metrics
-                col1, col2, col3, col4 = st.columns(4)
-                
-                market_metrics = {
-                    'total_stocks': len(predictions_df),
-                    'bullish_signals': len(predictions_df[predictions_df['predicted_return'] == 1]),
-                    'high_confidence': len(predictions_df[predictions_df['ensemble_confidence'] > 0.8]),
-                    'low_risk': len(predictions_df[predictions_df['risk_score'] < 0.3])
-                }
-                
-                with col1:
-                    st.metric("Market Coverage", f"{market_metrics['total_stocks']} stocks")
-                with col2:
-                    st.metric("Bullish Signals", f"{market_metrics['bullish_signals']}")
-                    st.caption(f"{market_metrics['bullish_signals']/market_metrics['total_stocks']:.1%} of market")
-                with col3:
-                    st.metric("High Confidence", f"{market_metrics['high_confidence']}")
-                    st.caption(f"{market_metrics['high_confidence']/market_metrics['total_stocks']:.1%} confidence")
-                with col4:
-                    st.metric("Low Risk Opportunities", f"{market_metrics['low_risk']}")
-                    st.caption(f"{market_metrics['low_risk']/market_metrics['total_stocks']:.1%} low risk")
-                
-                # Market heatmap
-                st.subheader("Market Heatmap")
-                
-                # Create market segments
-                predictions_df['market_segment'] = predictions_df.apply(lambda row: 
-                    'High Potential' if row['success_prob'] > 0.7 and row['risk_score'] < 0.5 else
-                    'Risky Growth' if row['success_prob'] > 0.6 and row['risk_score'] > 0.6 else
-                    'Conservative' if row['success_prob'] > 0.5 and row['risk_score'] < 0.4 else
-                    'Speculative', axis=1
-                )
-                
-                segment_counts = predictions_df['market_segment'].value_counts()
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Market segments pie chart
-                    fig = px.pie(
-                        values=segment_counts.values,
-                        names=segment_counts.index,
-                        title="Market Segment Distribution",
-                        color_discrete_sequence=['#56ab2f', '#f5576c', '#667eea', '#764ba2']
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                with col2:
-                    # Success probability vs risk heatmap
-                    fig = px.density_heatmap(
-                        predictions_df,
-                        x='risk_score',
-                        y='success_prob',
-                        title="Risk-Return Density Map",
-                        color_continuous_scale='viridis'
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                # Top performers by category
-                st.subheader("Category Leaders")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.markdown("### **Highest Growth Potential**")
-                    high_growth = predictions_df.nlargest(5, 'success_prob')
-                    for _, row in high_growth.iterrows():
-                        st.markdown(f"**{row['ticker']}** - {row['success_prob']:.1%}")
-                        st.caption(f"Confidence: {row['ensemble_confidence']:.1%}")
-                
-                with col2:
-                    st.markdown("### **Lowest Risk**")
-                    low_risk = predictions_df.nsmallest(5, 'risk_score')
-                    for _, row in low_risk.iterrows():
-                        st.markdown(f"**{row['ticker']}** - Risk: {row['risk_score']:.2f}")
-                        st.caption(f"Success: {row['success_prob']:.1%}")
-                
-                with col3:
-                    st.markdown("### **Best Risk-Adjusted**")
-                    predictions_df['risk_adj'] = predictions_df['success_prob'] / (predictions_df['risk_score'] + 0.01)
-                    best_adjusted = predictions_df.nlargest(5, 'risk_adj')
-                    for _, row in best_adjusted.iterrows():
-                        st.markdown(f"**{row['ticker']}** - Ratio: {row['risk_adj']:.2f}")
-                        st.caption(f"Success: {row['success_prob']:.1%}, Risk: {row['risk_score']:.2f}")
-            else:
-                st.warning("No market intelligence available. Please generate predictions first.")
+            create_backtesting_tab(models, featured_data, raw_data)
         
-        # Tab 5: System Dashboard
+        # Tab 5: Model Analytics & Performance
         with tab5:
-            st.header("Enhanced System Dashboard")
+            st.header("📊 Advanced Model Analytics")
+            create_model_analytics_dashboard(training_summary, selected_tickers)
+        
+        # Tab 6: Market Intelligence
+        with tab6:
+            st.header("🔍 Market Intelligence")
+            create_market_intelligence_dashboard(predictions_df, price_targets_df, selected_tickers)
+        
+        # Tab 7: System Dashboard
+        with tab7:
+            st.header("⚙️ Enhanced System Dashboard")
+            create_enhanced_system_dashboard(models, selected_tickers, training_summary)
             
-            # System performance metrics
-            st.subheader("System Performance")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("Data Sources", "NSE + BSE")
-                st.caption("Real-time market data")
-            with col2:
-                st.metric("Features Generated", "200+")
-                st.caption("Technical & fundamental")
-            with col3:
-                st.metric("Model Types", len(model_types))
-                st.caption("Ensemble learning")
-            with col4:
-                st.metric("Historical Data", "15 years")
-                st.caption("Deep market history")
-            
-            # Feature engineering status
-            st.subheader("Feature Engineering Status")
-            
-            feature_categories = {
-                'Price Features': 85,
-                'Volume Features': 90,
-                'Technical Indicators': 95,
-                'Volatility Features': 88,
-                'Momentum Features': 92,
-                'Trend Features': 87,
-                'Pattern Features': 82,
-                'Sentiment Features': 79,
-                'Microstructure Features': 84
-            }
-            
-            for category, completion in feature_categories.items():
-                st.progress(completion / 100, text=f"{category}: {completion}%")
-            
-            # Model performance summary
-            st.subheader("Model Performance Summary")
-            
-            if training_summary and 'training_results' in training_summary:
-                performance_data = []
-                
-                for result in training_summary['training_results']:
-                    model_name = result['model_key'].split('_')[0]
-                    performance_data.append({
-                        'Model': model_name.upper(),
-                        'Score': result['score'],
-                        'Training Time': f"{result['training_time']:.1f}s",
-                        'Features': result['feature_count']
-                    })
-                
-                perf_df = pd.DataFrame(performance_data)
-                st.dataframe(perf_df, use_container_width=True)
-            else:
-                st.info("No performance data available. Train models to see metrics.")
-            
-            # System health checks
-            st.subheader("System Health")
-            
-            health_checks = {
-                "Data Pipeline": "Operational",
-                "Feature Engineering": "Optimal",
-                "Model Training": "Complete",
-                "Prediction Engine": "Active",
-                "Cache System": "Efficient",
-                "Database": "Connected"
-            }
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                for check, status in list(health_checks.items())[:3]:
-                    st.markdown(f"**{check}**: {status}")
-            
-            with col2:
-                for check, status in list(health_checks.items())[3:]:
-                    st.markdown(f"**{check}**: {status}")
-            
-            # Memory and resource usage
-            st.subheader("Resource Usage")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                # Simulate memory usage
-                memory_usage = 68  # Percentage
-                st.metric("Memory Usage", f"{memory_usage}%")
-                st.progress(memory_usage / 100)
-            
-            with col2:
-                # Simulate CPU usage
-                cpu_usage = 45  # Percentage
-                st.metric("CPU Usage", f"{cpu_usage}%")
-                st.progress(cpu_usage / 100)
-            
-            with col3:
-                # Cache efficiency
-                cache_efficiency = 92  # Percentage
-                st.metric("Cache Hit Rate", f"{cache_efficiency}%")
-                st.progress(cache_efficiency / 100)
-            
-            # Advanced system controls
-            st.subheader("Advanced Controls")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if st.button("Refresh Data Cache"):
-                    st.info("Data cache refreshed successfully!")
-            
-            with col2:
-                if st.button("Clear Memory"):
-                    gc.collect()
-                    st.success("Memory optimized!")
-            
-            with col3:
-                if st.button("Export Results"):
-                    # Create export data
-                    if not predictions_df.empty:
-                        export_data = {
-                            'predictions': predictions_df.to_dict('records'),
-                            'timestamp': datetime.now().isoformat(),
-                            'model_config': {
-                                'horizon': investment_horizon,
-                                'ensemble_method': ensemble_method,
-                                'model_types': model_types
-                            }
-                        }
-                        st.download_button(
-                            "Download Results",
-                            data=pd.DataFrame(predictions_df).to_csv(index=False),
-                            file_name=f"ai_stock_predictions_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                            mime="text/csv"
-                        )
-                    else:
-                        st.warning("No results to export.")
-    
     except Exception as e:
         st.error(f"Application error: {str(e)}")
         st.info("Try refreshing the page or adjusting your settings")
@@ -1051,10 +1672,10 @@ def main():
     
     # Footer
     st.markdown("---")
-    st.markdown("""
+    st.markdown(f"""
     <div style='text-align: center; color: #666; padding: 20px;'>
-        <p><strong>AI Stock Advisor Pro - Enhanced Version</strong></p>
-        <p>Powered by Advanced Machine Learning • Real-time Market Analysis • Professional-Grade Insights</p>
+        <p><strong>AI Stock Advisor Pro - Complete Edition</strong></p>
+        <p>Analyzing {len(selected_tickers)} selected stocks • Investment Horizon: {investment_horizon} • Backtesting: {'Enabled' if BACKTESTING_AVAILABLE else 'Disabled'}</p>
         <p><em>Disclaimer: This tool provides analysis for educational purposes. Always consult financial advisors for investment decisions.</em></p>
     </div>
     """, unsafe_allow_html=True)

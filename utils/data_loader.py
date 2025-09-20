@@ -444,7 +444,8 @@ def fetch_historical_data_enhanced(tickers: List[str],
     # Validate and filter tickers
     tickers = validate_and_filter_tickers(tickers)
     
-    print(f"Fetching enhanced data for {len(tickers)} tickers...")
+    print(f"Fetching enhanced data for {len(tickers)} selected tickers...")
+    print(f"Selected stocks: {tickers}")
     print(f"Maximum period: {config.get('max_period', '20y')}")
     print(f"Using database cache: {config.get('use_database', False)}")
     
@@ -663,19 +664,26 @@ def generate_data_quality_report(data_dict: Dict[str, pd.DataFrame]):
 # ==================== MAIN INTERFACE ====================
 def get_comprehensive_stock_data(tickers: Optional[List[str]] = None,
                                config: Dict = None,
-                               max_tickers: int = None) -> Dict[str, pd.DataFrame]:
+                               max_tickers: int = None,
+                               selected_tickers: List[str] = None) -> Dict[str, pd.DataFrame]:
     """Main interface for comprehensive stock data collection"""
     config = config or DATA_CONFIG
     
-    # Get tickers
-    if tickers is None:
+    # Use selected_tickers if provided, otherwise use default logic
+    if selected_tickers:
+        tickers = selected_tickers
+        print(f"Using user-selected tickers: {len(tickers)} stocks")
+    elif tickers is None:
         tickers = get_updated_nifty_tickers()
+        print(f"Using default NIFTY tickers: {len(tickers)} stocks")
         
-    if max_tickers:
+    if max_tickers and not selected_tickers:
         tickers = tickers[:max_tickers]
+        print(f"Limited to max_tickers: {len(tickers)} stocks")
     
     print(f"Starting comprehensive data collection...")
     print(f"Target tickers: {len(tickers)}")
+    print(f"Selected stocks: {tickers}")
     print(f"Max period: {config['max_period']}")
     print(f"Database enabled: {config['use_database']}")
     
@@ -702,23 +710,25 @@ def get_nifty_50_tickers() -> List[str]:
 
 # ==================== EXAMPLE USAGE ====================
 if __name__ == "__main__":
-    print("Enhanced Stock Data Loader - Fixed Version")
+    print("Enhanced Stock Data Loader - User Selection Version")
     print("="*60)
     
-    # Test the system
+    # Test the system with user selection
     try:
-        # Get a small sample of tickers for testing
-        test_tickers = get_updated_nifty_tickers()[:5]
+        # Simulate user selection
+        all_tickers = get_updated_nifty_tickers()
+        selected_tickers = all_tickers[:5]  # Select first 5 for testing
         
-        print(f"Testing with {len(test_tickers)} tickers:")
-        for ticker in test_tickers:
+        print(f"Available tickers: {len(all_tickers)}")
+        print(f"User selected: {len(selected_tickers)} tickers")
+        for ticker in selected_tickers:
             print(f"  - {ticker}")
         
-        # Fetch data
-        data = get_comprehensive_stock_data(test_tickers, max_tickers=5)
+        # Fetch data for selected tickers only
+        data = get_comprehensive_stock_data(selected_tickers=selected_tickers)
         
         if data:
-            print(f"\nSuccessfully loaded data for {len(data)} tickers")
+            print(f"\nSuccessfully loaded data for {len(data)} selected tickers")
             for ticker, df in data.items():
                 if not df.empty:
                     print(f"  {ticker}: {len(df)} records from {df.index[0].strftime('%Y-%m-%d')} to {df.index[-1].strftime('%Y-%m-%d')}")
@@ -730,10 +740,9 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Test failed: {e}")
         
-    print("\nFixed Issues:")
-    print("  ✓ Error handling improvements")
-    print("  ✓ Database connection stability")
-    print("  ✓ Rate limiting and retry logic")
-    print("  ✓ Data validation enhancements")
-    print("  ✓ Backward compatibility")
-    print("  ✓ Comprehensive logging")
+    print("\nUser Selection Features:")
+    print("  ✓ Support for user-selected stocks only")
+    print("  ✓ Faster processing with fewer stocks")
+    print("  ✓ Resource-efficient data fetching")
+    print("  ✓ Backward compatibility maintained")
+    print("  ✓ Enhanced error handling and logging")

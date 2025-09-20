@@ -835,9 +835,16 @@ def process_ticker_features_safe(args):
 
 def create_features_parallel_safe(data_dict: Dict[str, pd.DataFrame], 
                                 config: Dict = None,
-                                max_workers: int = None) -> Dict[str, pd.DataFrame]:
-    """Thread-safe parallel feature creation"""
+                                max_workers: int = None,
+                                selected_tickers: List[str] = None) -> Dict[str, pd.DataFrame]:
+    """Thread-safe parallel feature creation for selected tickers"""
     config = config or FEATURE_CONFIG
+    
+    # Filter data_dict to only include selected tickers if provided
+    if selected_tickers:
+        data_dict = {ticker: df for ticker, df in data_dict.items() 
+                    if ticker in selected_tickers}
+        print(f"Processing features for {len(data_dict)} selected tickers")
     
     if not config.get('parallel_processing', False) or len(data_dict) <= 2:
         # Sequential processing for small datasets or when parallel is disabled
@@ -856,7 +863,7 @@ def create_features_parallel_safe(data_dict: Dict[str, pd.DataFrame],
     tasks = [(ticker, df, config) for ticker, df in data_dict.items()]
     results = {}
     
-    print(f"Processing {len(tasks)} tickers with {max_workers} workers...")
+    print(f"Processing {len(tasks)} selected tickers with {max_workers} workers...")
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_ticker = {executor.submit(process_ticker_features_safe, task): task[0] 
@@ -882,12 +889,20 @@ def create_features_parallel_safe(data_dict: Dict[str, pd.DataFrame],
 def engineer_features_enhanced(data_dict: Dict[str, pd.DataFrame],
                              config: Dict = None,
                              use_cache: bool = True,
-                             parallel: bool = True) -> Dict[str, pd.DataFrame]:
+                             parallel: bool = True,
+                             selected_tickers: List[str] = None) -> Dict[str, pd.DataFrame]:
     """
-    Enhanced main interface for feature engineering
+    Enhanced main interface for feature engineering with selected ticker support
     """
     config = config or FEATURE_CONFIG
     config['parallel_processing'] = parallel
+    
+    # Filter data_dict to only include selected tickers if provided
+    if selected_tickers:
+        original_count = len(data_dict)
+        data_dict = {ticker: df for ticker, df in data_dict.items() 
+                    if ticker in selected_tickers}
+        print(f"Filtered from {original_count} to {len(data_dict)} selected tickers")
     
     # Initialize enhanced cache
     cache = EnhancedTrainingCache() if use_cache else None
@@ -895,7 +910,7 @@ def engineer_features_enhanced(data_dict: Dict[str, pd.DataFrame],
     processed_data = {}
     cache_hits = 0
     
-    print(f"Starting enhanced feature engineering for {len(data_dict)} tickers...")
+    print(f"Starting enhanced feature engineering for {len(data_dict)} selected tickers...")
     
     # First pass: check cache
     remaining_data = {}
@@ -920,7 +935,7 @@ def engineer_features_enhanced(data_dict: Dict[str, pd.DataFrame],
     # Process remaining tickers
     if remaining_data:
         if parallel and len(remaining_data) > 1:
-            new_results = create_features_parallel_safe(remaining_data, config)
+            new_results = create_features_parallel_safe(remaining_data, config, selected_tickers=list(remaining_data.keys()))
         else:
             new_results = {}
             for ticker, df in tqdm(remaining_data.items(), desc="Sequential processing"):
@@ -940,14 +955,14 @@ def engineer_features_enhanced(data_dict: Dict[str, pd.DataFrame],
         sample_df = next(df for df in processed_data.values() if not df.empty)
         feature_count = len([col for col in sample_df.columns if not col.startswith('Target_')])
         target_count = len([col for col in sample_df.columns if col.startswith('Target_')])
-        print(f"Features per ticker: {feature_count} features, {target_count} targets")
+        print(f"Features per selected ticker: {feature_count} features, {target_count} targets")
     
     return processed_data
 
 # ==================== EXAMPLE USAGE ====================
 
 if __name__ == "__main__":
-    print("Enhanced Feature Engineering System - Fixed Version")
+    print("Enhanced Feature Engineering System - User Selection Version")
     print("="*60)
     
     # Enhanced configuration
@@ -961,13 +976,16 @@ if __name__ == "__main__":
     for key, value in enhanced_config.items():
         print(f"  {key}: {value}")
     
-    print(f"\nNew features added:")
-    print(f"  Ã¢Å“â€œ Advanced price features (gaps, spreads, crossovers)")
-    print(f"  Ã¢Å“â€œ Enhanced volume features (OBV, VWAP, accumulation)")
-    print(f"  Ã¢Å“â€œ Candlestick patterns (doji, hammer, engulfing)")
-    print(f"  Ã¢Å“â€œ Market sentiment indicators")
-    print(f"  Ã¢Å“â€œ Market microstructure features")
-    print(f"  Ã¢Å“â€œ Multi-timeframe analysis")
-    print(f"  Ã¢Å“â€œ Fixed caching system (no Series hash error)")
-    print(f"  Ã¢Å“â€œ Enhanced error handling and logging")
-    print(f"  Ã¢Å“â€œ Comprehensive data cleaning")
+    print(f"\nUser Selection Features:")
+    print(f"  ✓ Process only user-selected stocks")
+    print(f"  ✓ Faster feature engineering for selected tickers")
+    print(f"  ✓ Efficient caching for selected stocks")
+    print(f"  ✓ Advanced price features (gaps, spreads, crossovers)")
+    print(f"  ✓ Enhanced volume features (OBV, VWAP, accumulation)")
+    print(f"  ✓ Candlestick patterns (doji, hammer, engulfing)")
+    print(f"  ✓ Market sentiment indicators")
+    print(f"  ✓ Market microstructure features")
+    print(f"  ✓ Multi-timeframe analysis")
+    print(f"  ✓ Fixed caching system (no Series hash error)")
+    print(f"  ✓ Enhanced error handling and logging")
+    print(f"  ✓ Comprehensive data cleaning")
