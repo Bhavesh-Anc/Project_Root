@@ -25,6 +25,139 @@ warnings.filterwarnings('ignore')
 logging.basicConfig(level=logging.INFO)
 
 @dataclass
+class MLStrategy:
+    """Machine Learning Strategy for backtesting"""
+    
+    def __init__(self, models: Dict, featured_data: Dict, horizon: str = 'next_month'):
+        """
+        Initialize ML Strategy
+        
+        Args:
+            models: Dictionary of trained models {ticker: model_dict}
+            featured_data: Dictionary of featured dataframes {ticker: df}
+            horizon: Prediction horizon ('next_month', 'next_week', etc.)
+        """
+        self.models = models
+        self.featured_data = featured_data
+        self.horizon = horizon
+        self.lookback_window = 30  # Days for signal generation
+        
+    def generate_signals(self, data: Dict[str, pd.DataFrame], current_date: datetime) -> Dict[str, float]:
+        """
+        Generate trading signals for given date
+        
+        Args:
+            data: Dictionary of price data {ticker: df}
+            current_date: Current trading date
+            
+        Returns:
+            Dictionary of signals {ticker: signal_strength} where signal_strength is between -1 and 1
+        """
+        signals = {}
+        
+        try:
+            for ticker in self.models.keys():
+                if ticker not in data:
+                    continue
+                    
+                # Get data up to current date
+                ticker_data = data[ticker][data[ticker].index <= current_date].copy()
+                
+                if len(ticker_data) < self.lookback_window:
+                    continue
+                
+                # Get recent data for prediction
+                recent_data = ticker_data.tail(1)
+                
+                if ticker in self.featured_data:
+                    # Use featured data if available
+                    featured_df = self.featured_data[ticker]
+                    feature_data = featured_df[featured_df.index <= current_date].tail(1)
+                    
+                    if not feature_data.empty and ticker in self.models:
+                        model_dict = self.models[ticker]
+                        
+                        if 'best_model' in model_dict:
+                            model = model_dict['best_model']
+                            
+                            # Prepare features (exclude target columns)
+                            feature_cols = [col for col in feature_data.columns 
+                                          if not col.startswith('next_') and 
+                                          col not in ['symbol', 'date']]
+                            
+                            if feature_cols:
+                                X = feature_data[feature_cols].fillna(0)
+                                
+                                # Generate prediction
+                                try:
+                                    if hasattr(model, 'predict'):
+                                        prediction = model.predict(X)[0]
+                                        # Convert prediction to signal strength (-1 to 1)
+                                        signal_strength = np.tanh(prediction / 100)  # Normalize
+                                        signals[ticker] = float(signal_strength)
+                                    else:
+                                        signals[ticker] = 0.0
+                                except Exception as e:
+                                    logging.warning(f"Prediction failed for {ticker}: {e}")
+                                    signals[ticker] = 0.0
+                            else:
+                                signals[ticker] = 0.0
+                        else:
+                            signals[ticker] = 0.0
+                    else:
+                        signals[ticker] = 0.0
+                else:
+                    # Simple momentum strategy as fallback
+                    if len(ticker_data) >= 20:
+                        short_ma = ticker_data['close'].tail(5).mean()
+                        long_ma = ticker_data['close'].tail(20).mean()
+                        signal_strength = (short_ma - long_ma) / long_ma
+                        signals[ticker] = float(np.clip(signal_strength, -1, 1))
+                    else:
+                        signals[ticker] = 0.0
+                        
+        except Exception as e:
+            logging.error(f"Signal generation failed: {e}")
+            
+        return signals
+    
+    def get_exit_signal(self, ticker: str, entry_date: datetime, current_date: datetime, 
+                       entry_price: float, current_price: float, current_return: float) -> Tuple[bool, str]:
+        """
+        Determine if position should be exited
+        
+        Args:
+            ticker: Stock ticker
+            entry_date: Position entry date
+            current_date: Current date
+            entry_price: Entry price
+            current_price: Current price
+            current_return: Current return percentage
+            
+        Returns:
+            Tuple of (should_exit, exit_reason)
+        """
+        # Simple exit rules - can be enhanced
+        holding_days = (current_date - entry_date).days
+        
+        # Exit conditions
+        if current_return > 0.20:  # 20% profit target
+            return True, "profit_target"
+        elif current_return < -0.10:  # 10% stop loss
+            return True, "stop_loss"
+        elif holding_days > 60:  # Maximum holding period
+            return True, "max_holding_period"
+        
+        return False, "hold"
+    
+    def get_strategy_name(self) -> str:
+        """Return strategy name"""
+        return f"ML_Strategy_{self.horizon}"
+    
+    def get_required_data_columns(self) -> List[str]:
+        """Return list of required data columns"""
+        return ['open', 'high', 'low', 'close', 'volume']
+
 class EnhancedBacktestConfig:
     """Enhanced configuration with comprehensive risk management"""
     # Original backtesting parameters
