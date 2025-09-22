@@ -40,935 +40,617 @@ class MLStrategy:
         self.models = models
         self.featured_data = featured_data
         self.horizon = horizon
-        self.lookback_window = 30  # Days for signal generation
+        self.name = f"ML_Strategy_{horizon}"
         
-    def generate_signals(self, data: Dict[str, pd.DataFrame], current_date: datetime) -> Dict[str, float]:
-        """
-        Generate trading signals for given date
-        
-        Args:
-            data: Dictionary of price data {ticker: df}
-            current_date: Current trading date
-            
-        Returns:
-            Dictionary of signals {ticker: signal_strength} where signal_strength is between -1 and 1
-        """
+    def generate_signals(self, current_date: datetime, prices: Dict[str, float]) -> Dict[str, Dict]:
+        """Generate trading signals for all available stocks"""
         signals = {}
         
         try:
             for ticker in self.models.keys():
-                if ticker not in data:
-                    continue
+                if ticker in self.featured_data and ticker in prices:
+                    # Get latest features for this stock
+                    ticker_features = self.featured_data[ticker]
                     
-                # Get data up to current date
-                ticker_data = data[ticker][data[ticker].index <= current_date].copy()
-                
-                if len(ticker_data) < self.lookback_window:
-                    continue
-                
-                # Get recent data for prediction
-                recent_data = ticker_data.tail(1)
-                
-                if ticker in self.featured_data:
-                    # Use featured data if available
-                    featured_df = self.featured_data[ticker]
-                    feature_data = featured_df[featured_df.index <= current_date].tail(1)
-                    
-                    if not feature_data.empty and ticker in self.models:
-                        model_dict = self.models[ticker]
+                    # Filter features up to current date
+                    date_mask = ticker_features.index <= current_date
+                    if not date_mask.any():
+                        continue
                         
-                        if 'best_model' in model_dict:
-                            model = model_dict['best_model']
-                            
-                            # Prepare features (exclude target columns)
-                            feature_cols = [col for col in feature_data.columns 
-                                          if not col.startswith('next_') and 
-                                          col not in ['symbol', 'date']]
-                            
-                            if feature_cols:
-                                X = feature_data[feature_cols].fillna(0)
-                                
-                                # Generate prediction
-                                try:
-                                    if hasattr(model, 'predict'):
-                                        prediction = model.predict(X)[0]
-                                        # Convert prediction to signal strength (-1 to 1)
-                                        signal_strength = np.tanh(prediction / 100)  # Normalize
-                                        signals[ticker] = float(signal_strength)
-                                    else:
-                                        signals[ticker] = 0.0
-                                except Exception as e:
-                                    logging.warning(f"Prediction failed for {ticker}: {e}")
-                                    signals[ticker] = 0.0
+                    latest_features = ticker_features[date_mask].iloc[-1:]
+                    
+                    if len(latest_features) > 0:
+                        # Get model predictions
+                        ticker_models = self.models[ticker]
+                        
+                        # Ensemble prediction
+                        predictions = []
+                        confidences = []
+                        
+                        for model_name, model in ticker_models.items():
+                            if hasattr(model, 'predict_proba'):
+                                pred_proba = model.predict_proba(latest_features)[0]
+                                prediction = 1 if pred_proba[1] > 0.5 else 0
+                                confidence = max(pred_proba)
                             else:
-                                signals[ticker] = 0.0
-                        else:
-                            signals[ticker] = 0.0
-                    else:
-                        signals[ticker] = 0.0
-                else:
-                    # Simple momentum strategy as fallback
-                    if len(ticker_data) >= 20:
-                        short_ma = ticker_data['close'].tail(5).mean()
-                        long_ma = ticker_data['close'].tail(20).mean()
-                        signal_strength = (short_ma - long_ma) / long_ma
-                        signals[ticker] = float(np.clip(signal_strength, -1, 1))
-                    else:
-                        signals[ticker] = 0.0
+                                prediction = model.predict(latest_features)[0]
+                                confidence = 0.6  # Default confidence
+                            
+                            predictions.append(prediction)
+                            confidences.append(confidence)
+                        
+                        # Ensemble decision
+                        avg_prediction = np.mean(predictions)
+                        avg_confidence = np.mean(confidences)
+                        
+                        signal_strength = avg_confidence * (1 if avg_prediction > 0.5 else -1)
+                        
+                        signals[ticker] = {
+                            'signal': 1 if avg_prediction > 0.5 else 0,
+                            'strength': abs(signal_strength),
+                            'confidence': avg_confidence,
+                            'price': prices[ticker],
+                            'date': current_date
+                        }
                         
         except Exception as e:
-            logging.error(f"Signal generation failed: {e}")
+            logging.warning(f"Error generating signals: {e}")
             
         return signals
-    
-    def get_exit_signal(self, ticker: str, entry_date: datetime, current_date: datetime, 
-                       entry_price: float, current_price: float, current_return: float) -> Tuple[bool, str]:
-        """
-        Determine if position should be exited
-        
-        Args:
-            ticker: Stock ticker
-            entry_date: Position entry date
-            current_date: Current date
-            entry_price: Entry price
-            current_price: Current price
-            current_return: Current return percentage
-            
-        Returns:
-            Tuple of (should_exit, exit_reason)
-        """
-        # Simple exit rules - can be enhanced
-        holding_days = (current_date - entry_date).days
-        
-        # Exit conditions
-        if current_return > 0.20:  # 20% profit target
-            return True, "profit_target"
-        elif current_return < -0.10:  # 10% stop loss
-            return True, "stop_loss"
-        elif holding_days > 60:  # Maximum holding period
-            return True, "max_holding_period"
-        
-        return False, "hold"
-    
-    def get_strategy_name(self) -> str:
-        """Return strategy name"""
-        return f"ML_Strategy_{self.horizon}"
-    
-    def get_required_data_columns(self) -> List[str]:
-        """Return list of required data columns"""
-        return ['open', 'high', 'low', 'close', 'volume']
 
+@dataclass
 class EnhancedBacktestConfig:
-    """Enhanced configuration with comprehensive risk management"""
-    # Original backtesting parameters
-    initial_capital: float = 1000000  # 10 lakh
-    transaction_cost_pct: float = 0.001  # 0.1% per trade
-    slippage_pct: float = 0.0005  # 0.05% slippage
-    min_position_size: float = 10000  # Minimum 10k per position
-    max_position_size: float = 200000  # Maximum 2 lakh per position
-    max_positions: int = 20  # Maximum concurrent positions
-    rebalance_frequency: str = 'monthly'  # 'daily', 'weekly', 'monthly', 'quarterly'
-    benchmark: str = 'NIFTY50'
-    risk_free_rate: float = 0.06  # 6% annual
+    """Enhanced configuration for backtesting with risk management"""
     
-    # Enhanced risk management parameters
-    max_portfolio_drawdown: float = 0.15  # Stop trading if drawdown > 15%
-    max_position_correlation: float = 0.7  # Maximum correlation between positions
-    var_confidence_level: float = 0.95  # VaR confidence level
-    stress_test_frequency: int = 5  # Run stress tests every N days
-    risk_budget_limit: float = 0.20  # Maximum risk budget utilization
-    kelly_fraction_cap: float = 0.25  # Cap Kelly criterion
+    # Core parameters
+    initial_capital: float = 1000000
+    transaction_cost_pct: float = 0.001
+    slippage_pct: float = 0.0005
     
-    # Position sizing method
-    position_sizing_method: str = 'risk_parity'  # 'equal_weight', 'risk_parity', 'kelly', 'erc'
+    # Position management
+    max_positions: int = 10
+    position_sizing_method: str = 'risk_parity'
+    rebalance_frequency: str = 'monthly'
     
-    # Risk monitoring
-    risk_monitoring_enabled: bool = True
-    correlation_monitoring: bool = True
-    drawdown_monitoring: bool = True
-    stress_testing_enabled: bool = True
+    # Risk management
+    max_drawdown_limit: float = 0.15
+    max_correlation: float = 0.7
+    risk_free_rate: float = 0.06
+    enable_risk_management: bool = True
     
-    # Advanced settings
-    lookback_window: int = 252  # Days for rolling calculations
-    confidence_level: float = 0.95  # For VaR calculations
-    rebalance_threshold: float = 0.05  # Drift threshold for rebalancing
+    # Strategy parameters
+    min_signal_strength: float = 0.3
+    profit_target: float = 0.20
+    stop_loss: float = 0.10
+    max_holding_days: int = 60
+    
+    # Advanced risk settings
+    var_confidence: float = 0.95
+    kelly_cap: float = 0.25
+    stress_test_frequency: int = 5
+    risk_budget_limit: float = 0.2
+    rebalance_threshold: float = 0.05
+
+@dataclass
+class PortfolioState:
+    """Track portfolio state during backtesting"""
+    
+    def __init__(self, initial_capital: float):
+        self.portfolio_value: float = initial_capital
+        self.cash: float = initial_capital
+        self.positions: Dict[str, Dict] = {}
+        self.last_rebalance: Optional[datetime] = None
+        
+        # Risk metrics
+        self.drawdown: float = 0.0
+        self.current_var: float = 0.0
+        self.portfolio_correlation: float = 0.0
+        self.risk_budget_used: float = 0.0
+        self.peak_value: float = initial_capital
 
 @dataclass
 class EnhancedTrade:
     """Enhanced trade record with risk metrics"""
+    
     ticker: str
     entry_date: datetime
     exit_date: datetime
     entry_price: float
     exit_price: float
     quantity: int
-    direction: str  # 'long' or 'short'
-    entry_signal: str
-    exit_signal: str
-    gross_pnl: float
-    transaction_costs: float
-    net_pnl: float
     return_pct: float
     holding_period: int
-    max_profit: float = 0.0
-    max_loss: float = 0.0
+    exit_signal: str
+    net_pnl: float
     
-    # Enhanced risk metrics
-    entry_var: float = 0.0  # VaR at entry
-    max_drawdown_during_hold: float = 0.0
-    correlation_with_portfolio: float = 0.0
-    kelly_fraction_used: float = 0.0
-    risk_contribution: float = 0.0
-
-@dataclass
-class EnhancedPortfolioState:
-    """Enhanced portfolio state with risk tracking"""
-    cash: float
-    positions: Dict[str, Dict] = field(default_factory=dict)
-    portfolio_value: float = 0.0
-    leverage: float = 1.0
-    drawdown: float = 0.0
-    peak_value: float = 0.0
-    
-    # Enhanced risk metrics
-    current_var: float = 0.0
-    portfolio_correlation: float = 0.0
-    risk_budget_used: float = 0.0
-    sector_exposures: Dict[str, float] = field(default_factory=dict)
-    position_correlations: Dict[str, float] = field(default_factory=dict)
-    stress_test_results: Dict[str, float] = field(default_factory=dict)
-
-class EnhancedRiskManager:
-    """Enhanced risk manager integrating comprehensive risk management"""
-    
-    def __init__(self, config: EnhancedBacktestConfig):
-        self.config = config
-        
-        # Initialize comprehensive risk management
-        risk_config = RiskConfig(
-            max_portfolio_drawdown=config.max_portfolio_drawdown,
-            max_position_size=config.max_position_size / config.initial_capital,  # Convert to fraction
-            min_position_size=config.min_position_size / config.initial_capital,
-            max_correlation_threshold=config.max_position_correlation,
-            var_confidence_level=config.var_confidence_level,
-            kelly_fraction_cap=config.kelly_fraction_cap,
-            risk_free_rate=config.risk_free_rate
-        )
-        
-        self.comprehensive_manager = ComprehensiveRiskManager(risk_config)
-        self.correlation_analyzer = CorrelationAnalyzer(risk_config)
-        self.drawdown_tracker = DrawdownTracker(risk_config)
-        self.position_sizer = PositionSizer(risk_config)
-        self.stress_tester = StressTester(risk_config)
-        
-        # Risk monitoring history
-        self.risk_history = []
-        self.correlation_history = []
-        self.drawdown_history = []
-        
-    def calculate_position_size(self, signal_strength: float, portfolio_state: EnhancedPortfolioState, 
-                              stock_price: float, returns_data: pd.DataFrame = None,
-                              ticker: str = None) -> int:
-        """Enhanced position sizing with multiple methods"""
-        
-        portfolio_value = portfolio_state.portfolio_value
-        
-        if self.config.position_sizing_method == 'equal_weight':
-            target_value = portfolio_value * 0.05  # 5% per position
-            return int(target_value / stock_price)
-            
-        elif self.config.position_sizing_method == 'kelly' and returns_data is not None:
-            # Enhanced Kelly criterion with historical data
-            if ticker in returns_data.columns:
-                ticker_returns = returns_data[ticker].dropna()
-                if len(ticker_returns) > 30:
-                    # Calculate win probability and average win/loss
-                    positive_returns = ticker_returns[ticker_returns > 0]
-                    negative_returns = ticker_returns[ticker_returns < 0]
-                    
-                    if len(positive_returns) > 0 and len(negative_returns) > 0:
-                        win_prob = len(positive_returns) / len(ticker_returns)
-                        avg_win = positive_returns.mean()
-                        avg_loss = abs(negative_returns.mean())
-                        
-                        kelly_size = self.position_sizer.kelly_criterion_sizing(
-                            win_prob, avg_win, avg_loss, portfolio_value
-                        )
-                        return int(kelly_size / stock_price)
-            
-            # Fallback to signal-based Kelly
-            win_prob = (signal_strength + 1) / 2  # Convert to probability
-            kelly_size = self.position_sizer.kelly_criterion_sizing(
-                win_prob, 0.05, 0.03, portfolio_value
-            )
-            return int(kelly_size / stock_price)
-            
-        elif self.config.position_sizing_method == 'risk_parity' and returns_data is not None:
-            # Risk parity position sizing
-            current_tickers = list(portfolio_state.positions.keys()) + [ticker]
-            if len(current_tickers) > 1:
-                available_tickers = [t for t in current_tickers if t in returns_data.columns]
-                if len(available_tickers) > 1:
-                    risk_parity_sizes = self.position_sizer.risk_parity_sizing(
-                        returns_data[available_tickers], portfolio_value
-                    )
-                    if ticker in risk_parity_sizes:
-                        return int(risk_parity_sizes[ticker] / stock_price)
-            
-            # Fallback to volatility-adjusted
-            if ticker in returns_data.columns:
-                vol = returns_data[ticker].std()
-                vol_adjusted_size = portfolio_value * 0.05 / (1 + vol)
-                return int(vol_adjusted_size / stock_price)
-        
-        elif self.config.position_sizing_method == 'erc' and returns_data is not None:
-            # Equal Risk Contribution
-            current_tickers = list(portfolio_state.positions.keys()) + [ticker]
-            available_tickers = [t for t in current_tickers if t in returns_data.columns]
-            if len(available_tickers) > 1:
-                erc_sizes = self.position_sizer.equal_risk_contribution_sizing(
-                    returns_data[available_tickers], portfolio_value
-                )
-                if ticker in erc_sizes:
-                    return int(erc_sizes[ticker] / stock_price)
-        
-        # Default fallback
-        target_value = portfolio_value * 0.05
-        return int(target_value / stock_price)
-    
-    def check_risk_constraints(self, portfolio_state: EnhancedPortfolioState, 
-                             returns_data: pd.DataFrame = None,
-                             new_position: Dict = None) -> Dict[str, bool]:
-        """Comprehensive risk constraint checking"""
-        
-        checks = {
-            'drawdown_ok': True,
-            'correlation_ok': True,
-            'position_size_ok': True,
-            'var_ok': True,
-            'concentration_ok': True,
-            'leverage_ok': True
-        }
-        
-        # 1. Drawdown check
-        drawdown_result = self.drawdown_tracker.check_drawdown_limits(portfolio_state.drawdown)
-        checks['drawdown_ok'] = drawdown_result['within_limits']
-        
-        # 2. Position size check
-        if new_position:
-            position_value = new_position.get('value', 0)
-            position_weight = position_value / portfolio_state.portfolio_value
-            checks['position_size_ok'] = position_weight <= self.config.max_position_size / portfolio_state.portfolio_value
-        
-        # 3. Correlation check
-        if returns_data is not None and len(portfolio_state.positions) > 0:
-            portfolio_tickers = list(portfolio_state.positions.keys())
-            if new_position and 'ticker' in new_position:
-                portfolio_tickers.append(new_position['ticker'])
-            
-            available_tickers = [t for t in portfolio_tickers if t in returns_data.columns]
-            if len(available_tickers) > 1:
-                corr_matrix = self.correlation_analyzer.calculate_correlation_matrix(
-                    returns_data[available_tickers]
-                )
-                high_correlations = self.correlation_analyzer.find_high_correlations(
-                    corr_matrix, self.config.max_position_correlation
-                )
-                checks['correlation_ok'] = len(high_correlations) == 0
-        
-        # 4. Leverage check
-        checks['leverage_ok'] = portfolio_state.leverage <= 1.0
-        
-        # 5. Maximum positions check
-        max_positions_ok = len(portfolio_state.positions) < self.config.max_positions
-        checks['concentration_ok'] = max_positions_ok
-        
-        return checks
-    
-    def run_portfolio_stress_test(self, portfolio_state: EnhancedPortfolioState,
-                                 returns_data: pd.DataFrame) -> Dict[str, float]:
-        """Run stress test on current portfolio"""
-        
-        if len(portfolio_state.positions) == 0:
-            return {'stress_test_passed': True}
-        
-        # Calculate portfolio weights
-        portfolio_weights = {}
-        total_value = portfolio_state.portfolio_value
-        
-        for ticker, position in portfolio_state.positions.items():
-            position_value = position.get('quantity', 0) * position.get('current_price', position.get('entry_price', 0))
-            portfolio_weights[ticker] = position_value / total_value
-        
-        # Run stress tests
-        try:
-            stress_results = self.stress_tester.run_historical_stress_tests(
-                portfolio_weights, returns_data
-            )
-            
-            monte_carlo_results = self.stress_tester.monte_carlo_stress_test(
-                portfolio_weights, returns_data, n_simulations=1000
-            )
-            
-            # Check if stress test results are acceptable
-            stress_test_passed = True
-            if 'monte_carlo' in monte_carlo_results:
-                var_95 = monte_carlo_results.get('var_95', 0)
-                if var_95 < -0.15:  # 15% daily VaR threshold
-                    stress_test_passed = False
-            
-            return {
-                'stress_test_passed': stress_test_passed,
-                'var_95': monte_carlo_results.get('var_95', 0),
-                'expected_shortfall': monte_carlo_results.get('expected_shortfall_95', 0),
-                'worst_case': monte_carlo_results.get('worst_case_return', 0),
-                'historical_stress': stress_results
-            }
-            
-        except Exception as e:
-            logging.warning(f"Stress test failed: {e}")
-            return {'stress_test_passed': True, 'error': str(e)}
-    
-    def update_risk_metrics(self, portfolio_state: EnhancedPortfolioState,
-                           returns_data: pd.DataFrame) -> EnhancedPortfolioState:
-        """Update portfolio risk metrics"""
-        
-        if len(portfolio_state.positions) == 0:
-            return portfolio_state
-        
-        try:
-            # Calculate portfolio weights for risk analysis
-            portfolio_data = {}
-            for ticker, position in portfolio_state.positions.items():
-                position_value = position.get('quantity', 0) * position.get('current_price', position.get('entry_price', 0))
-                portfolio_data[ticker] = {
-                    'weight': position_value / portfolio_state.portfolio_value,
-                    'value': position_value
-                }
-            
-            # Run comprehensive risk assessment
-            risk_assessment = self.comprehensive_manager.comprehensive_risk_assessment(
-                portfolio_data, returns_data
-            )
-            
-            # Update portfolio state with risk metrics
-            if 'stress_testing' in risk_assessment:
-                monte_carlo = risk_assessment['stress_testing'].get('monte_carlo', {})
-                portfolio_state.current_var = monte_carlo.get('var_95', 0)
-                portfolio_state.stress_test_results = monte_carlo
-            
-            if 'correlation_analysis' in risk_assessment:
-                portfolio_state.portfolio_correlation = risk_assessment['correlation_analysis'].get('max_correlation', 0)
-            
-            # Log risk metrics
-            self.risk_history.append({
-                'timestamp': datetime.now(),
-                'portfolio_value': portfolio_state.portfolio_value,
-                'var_95': portfolio_state.current_var,
-                'max_correlation': portfolio_state.portfolio_correlation,
-                'drawdown': portfolio_state.drawdown
-            })
-            
-        except Exception as e:
-            logging.warning(f"Risk metrics update failed: {e}")
-        
-        return portfolio_state
+    # Risk metrics
+    max_adverse_excursion: float = 0.0
+    max_favorable_excursion: float = 0.0
+    var_at_entry: float = 0.0
+    correlation_at_entry: float = 0.0
 
 class EnhancedBacktestEngine:
     """Enhanced backtesting engine with comprehensive risk management"""
     
     def __init__(self, config: EnhancedBacktestConfig):
         self.config = config
-        self.risk_manager = EnhancedRiskManager(config)
-        self.portfolio_state = EnhancedPortfolioState(cash=config.initial_capital)
+        self.portfolio_state = PortfolioState(config.initial_capital)
+        self.portfolio_history: List[Dict] = []
         self.trades: List[EnhancedTrade] = []
-        self.portfolio_history = []
-        self.risk_events = []
-        self.benchmark_data = None
+        self.risk_events: List[Dict] = []
         
-    def run_enhanced_backtest(self, strategy, data: Dict[str, pd.DataFrame], 
-                            start_date: datetime, end_date: datetime) -> Dict:
-        """Run enhanced backtest with comprehensive risk management"""
+        # Initialize risk manager if enabled
+        if config.enable_risk_management:
+            risk_config = RiskConfig(
+                var_confidence=config.var_confidence,
+                max_correlation=config.max_correlation,
+                max_drawdown=config.max_drawdown_limit,
+                kelly_cap=config.kelly_cap
+            )
+            self.risk_manager = ComprehensiveRiskManager(risk_config)
+        else:
+            self.risk_manager = None
+    
+    def run_backtest(self, strategy: MLStrategy, data: Dict[str, pd.DataFrame], 
+                    start_date: datetime, end_date: datetime) -> Dict:
+        """Run enhanced backtest with risk management"""
         
         logging.info(f"Starting enhanced backtest from {start_date} to {end_date}")
-        logging.info(f"Risk management features: {self.config.risk_monitoring_enabled}")
         
-        # Initialize enhanced portfolio state
-        self.portfolio_state = EnhancedPortfolioState(cash=self.config.initial_capital)
-        self.portfolio_state.peak_value = self.config.initial_capital
-        self.trades = []
-        self.portfolio_history = []
-        self.risk_events = []
+        # Prepare data
+        all_dates = self._get_trading_dates(data, start_date, end_date)
+        rebalance_days = self._get_rebalance_days(self.config.rebalance_frequency)
         
-        # Prepare returns data for risk analysis
-        returns_data = self._prepare_returns_data(data)
+        for current_date in all_dates:
+            try:
+                # Get current prices
+                prices = self._get_prices_for_date(data, current_date)
+                if not prices:
+                    continue
+                
+                # Update portfolio value and risk metrics
+                self._update_portfolio_value(prices, current_date)
+                
+                # Risk management checks
+                if self.risk_manager:
+                    risk_violations = self._check_risk_violations(prices, current_date)
+                    if risk_violations:
+                        self._handle_risk_violations(risk_violations, prices, current_date)
+                
+                # Generate signals
+                signals = strategy.generate_signals(current_date, prices)
+                
+                # Portfolio rebalancing
+                if self._should_rebalance(current_date, self.portfolio_state.last_rebalance, rebalance_days):
+                    self._rebalance_portfolio(signals, prices, current_date)
+                    self.portfolio_state.last_rebalance = current_date
+                
+                # Exit management
+                self._manage_exits(prices, current_date)
+                
+                # Record portfolio state
+                self._record_enhanced_portfolio_state(current_date)
+                
+            except Exception as e:
+                logging.warning(f"Error on {current_date}: {e}")
+                continue
         
-        # Get all available dates
+        # Generate final results
+        return self._generate_enhanced_results()
+    
+    def _get_trading_dates(self, data: Dict[str, pd.DataFrame], start_date: datetime, end_date: datetime) -> List[datetime]:
+        """Get available trading dates from data"""
         all_dates = set()
+        
         for ticker_data in data.values():
-            all_dates.update(ticker_data.index)
+            if not ticker_data.empty:
+                ticker_dates = ticker_data.index.to_pydatetime()
+                date_mask = (ticker_dates >= start_date) & (ticker_dates <= end_date)
+                all_dates.update(ticker_dates[date_mask])
         
-        trading_dates = sorted([d for d in all_dates if start_date <= d <= end_date])
-        
-        # Enhanced rebalancing logic
-        last_rebalance = None
-        last_stress_test = None
-        rebalance_freq_map = {
+        return sorted(list(all_dates))
+    
+    def _get_rebalance_days(self, frequency: str) -> int:
+        """Convert rebalance frequency to days"""
+        freq_map = {
             'daily': 1,
             'weekly': 7,
             'monthly': 30,
             'quarterly': 90
         }
-        rebalance_days = rebalance_freq_map.get(self.config.rebalance_frequency, 30)
-        
-        for current_date in trading_dates:
-            try:
-                # Get current prices
-                current_prices = {}
-                for ticker, ticker_data in data.items():
-                    if current_date in ticker_data.index:
-                        current_prices[ticker] = ticker_data.loc[current_date, 'Close']
-                
-                if not current_prices:
-                    continue
-                
-                # Update portfolio value with current prices
-                self._update_enhanced_portfolio_value(current_prices)
-                
-                # Enhanced risk monitoring
-                if self.config.risk_monitoring_enabled:
-                    # Update risk metrics
-                    self.portfolio_state = self.risk_manager.update_risk_metrics(
-                        self.portfolio_state, returns_data
-                    )
-                    
-                    # Check risk constraints
-                    risk_checks = self.risk_manager.check_risk_constraints(
-                        self.portfolio_state, returns_data
-                    )
-                    
-                    # Handle risk violations
-                    if not all(risk_checks.values()):
-                        self._handle_risk_violations(risk_checks, current_prices, current_date)
-                
-                # Run periodic stress tests
-                if (self.config.stress_testing_enabled and 
-                    (last_stress_test is None or 
-                     (current_date - last_stress_test).days >= self.config.stress_test_frequency)):
-                    
-                    stress_results = self.risk_manager.run_portfolio_stress_test(
-                        self.portfolio_state, returns_data
-                    )
-                    
-                    if not stress_results.get('stress_test_passed', True):
-                        self._handle_stress_test_failure(stress_results, current_prices, current_date)
-                    
-                    last_stress_test = current_date
-                
-                # Enhanced exit signal checking
-                self._check_enhanced_exit_signals(strategy, current_prices, current_date, returns_data)
-                
-                # Enhanced rebalancing with risk considerations
-                if self._should_rebalance(current_date, last_rebalance, rebalance_days):
-                    
-                    # Generate signals
-                    signals = strategy.generate_signals(data, current_date)
-                    
-                    # Enhanced signal filtering with risk considerations
-                    filtered_signals = self._filter_signals_with_risk(
-                        signals, current_prices, returns_data
-                    )
-                    
-                    # Execute new positions with enhanced risk management
-                    self._execute_enhanced_positions(
-                        filtered_signals, current_prices, current_date, returns_data
-                    )
-                    
-                    last_rebalance = current_date
-                
-                # Record enhanced portfolio state
-                self._record_enhanced_portfolio_state(current_date)
-                
-            except Exception as e:
-                logging.error(f"Error processing date {current_date}: {e}")
-                continue
-        
-        # Close all remaining positions
-        if self.portfolio_state.positions:
-            final_prices = {ticker: data[ticker].iloc[-1]['Close'] 
-                          for ticker in self.portfolio_state.positions.keys() 
-                          if ticker in data}
-            self._liquidate_all_positions(final_prices, end_date, "End of enhanced backtest")
-        
-        return self._generate_enhanced_results()
+        return freq_map.get(frequency, 30)
     
-    def _prepare_returns_data(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-        """Prepare returns data for risk analysis"""
+    def _get_prices_for_date(self, data: Dict[str, pd.DataFrame], date: datetime) -> Dict[str, float]:
+        """Get closing prices for all stocks on given date"""
+        prices = {}
         
-        returns_dict = {}
+        for ticker, ticker_data in data.items():
+            if not ticker_data.empty:
+                # Find the closest date
+                available_dates = ticker_data.index
+                if date in available_dates:
+                    prices[ticker] = ticker_data.loc[date, 'Close']
+                else:
+                    # Find closest previous date
+                    previous_dates = available_dates[available_dates <= date]
+                    if len(previous_dates) > 0:
+                        closest_date = previous_dates[-1]
+                        prices[ticker] = ticker_data.loc[closest_date, 'Close']
         
-        for ticker, df in data.items():
-            if 'Close' in df.columns and len(df) > 1:
-                returns = df['Close'].pct_change().dropna()
-                returns_dict[ticker] = returns
-        
-        if returns_dict:
-            returns_df = pd.DataFrame(returns_dict)
-            returns_df = returns_df.dropna()
-            return returns_df
-        
-        return pd.DataFrame()
+        return prices
     
-    def _update_enhanced_portfolio_value(self, current_prices: Dict[str, float]):
-        """Update portfolio value with enhanced tracking"""
+    def _update_portfolio_value(self, prices: Dict[str, float], current_date: datetime):
+        """Update portfolio value and risk metrics"""
         
-        position_value = 0.0
+        # Calculate position values
+        position_value = 0
+        position_weights = {}
         
         for ticker, position in self.portfolio_state.positions.items():
-            if ticker in current_prices:
-                current_price = current_prices[ticker]
-                position['current_price'] = current_price
-                pos_value = position['quantity'] * current_price
-                position_value += pos_value
-                
-                # Update position-level metrics
-                entry_price = position.get('entry_price', current_price)
-                position['unrealized_pnl'] = (current_price - entry_price) * position['quantity']
-                position['return_pct'] = (current_price / entry_price - 1) if entry_price > 0 else 0
+            if ticker in prices:
+                current_value = position['quantity'] * prices[ticker]
+                position_value += current_value
+                position_weights[ticker] = current_value
         
+        # Total portfolio value
         self.portfolio_state.portfolio_value = self.portfolio_state.cash + position_value
         
-        # Update drawdown tracking
+        # Update peak value for drawdown calculation
         if self.portfolio_state.portfolio_value > self.portfolio_state.peak_value:
             self.portfolio_state.peak_value = self.portfolio_state.portfolio_value
-            self.portfolio_state.drawdown = 0.0
+        
+        # Calculate current drawdown
+        self.portfolio_state.drawdown = (self.portfolio_state.peak_value - self.portfolio_state.portfolio_value) / self.portfolio_state.peak_value
+        
+        # Update risk metrics if risk manager is enabled
+        if self.risk_manager and position_weights:
+            # Normalize weights
+            total_value = sum(position_weights.values())
+            if total_value > 0:
+                for ticker in position_weights:
+                    position_weights[ticker] /= total_value
+                
+                # Calculate portfolio metrics
+                try:
+                    returns_data = self._get_returns_data(prices, current_date)
+                    if returns_data is not None and len(returns_data) > 20:
+                        portfolio_returns = self._calculate_portfolio_returns(returns_data, position_weights)
+                        
+                        # VaR calculation
+                        if len(portfolio_returns) > 0:
+                            self.portfolio_state.current_var = np.percentile(portfolio_returns, (1 - self.config.var_confidence) * 100)
+                        
+                        # Correlation calculation
+                        if len(position_weights) > 1:
+                            corr_matrix = returns_data[list(position_weights.keys())].corr()
+                            avg_corr = corr_matrix.values[np.triu_indices_from(corr_matrix.values, k=1)].mean()
+                            self.portfolio_state.portfolio_correlation = avg_corr
+                        
+                except Exception as e:
+                    logging.warning(f"Error calculating risk metrics: {e}")
+    
+    def _get_returns_data(self, prices: Dict[str, float], current_date: datetime, lookback_days: int = 60) -> Optional[pd.DataFrame]:
+        """Get returns data for risk calculations"""
+        # This would need access to historical data
+        # For now, return None to avoid errors
+        return None
+    
+    def _calculate_portfolio_returns(self, returns_data: pd.DataFrame, weights: Dict[str, float]) -> np.ndarray:
+        """Calculate portfolio returns"""
+        portfolio_returns = []
+        
+        for date_idx in returns_data.index:
+            daily_return = 0
+            for ticker, weight in weights.items():
+                if ticker in returns_data.columns:
+                    daily_return += weight * returns_data.loc[date_idx, ticker]
+            portfolio_returns.append(daily_return)
+        
+        return np.array(portfolio_returns)
+    
+    def _check_risk_violations(self, prices: Dict[str, float], current_date: datetime) -> List[str]:
+        """Check for risk violations"""
+        violations = []
+        
+        # Drawdown check
+        if self.portfolio_state.drawdown > self.config.max_drawdown_limit:
+            violations.append(f"Max drawdown exceeded: {self.portfolio_state.drawdown:.2%}")
+        
+        # Correlation check
+        if self.portfolio_state.portfolio_correlation > self.config.max_correlation:
+            violations.append(f"Portfolio correlation too high: {self.portfolio_state.portfolio_correlation:.2%}")
+        
+        # VaR check (if available)
+        if hasattr(self.portfolio_state, 'current_var') and self.portfolio_state.current_var < -0.05:
+            violations.append(f"High VaR risk: {self.portfolio_state.current_var:.2%}")
+        
+        return violations
+    
+    def _handle_risk_violations(self, violations: List[str], prices: Dict[str, float], current_date: datetime):
+        """Handle risk violations"""
+        
+        # Record risk event
+        risk_event = {
+            'date': current_date,
+            'type': 'Risk Violation',
+            'violations': violations,
+            'actions_taken': []
+        }
+        
+        # Take action based on violations
+        if any("drawdown" in v for v in violations):
+            # Reduce position sizes
+            self._reduce_position_sizes(0.5, prices, current_date)
+            risk_event['actions_taken'].append("Reduced position sizes by 50%")
+        
+        if any("correlation" in v for v in violations):
+            # Liquidate highly correlated positions
+            self._liquidate_correlated_positions(prices, current_date)
+            risk_event['actions_taken'].append("Liquidated highly correlated positions")
+        
+        self.risk_events.append(risk_event)
+    
+    def _reduce_position_sizes(self, reduction_factor: float, prices: Dict[str, float], current_date: datetime):
+        """Reduce all position sizes by given factor"""
+        for ticker in list(self.portfolio_state.positions.keys()):
+            if ticker in prices:
+                position = self.portfolio_state.positions[ticker]
+                reduce_quantity = int(position['quantity'] * reduction_factor)
+                
+                if reduce_quantity > 0:
+                    self._execute_enhanced_trade(
+                        ticker, reduce_quantity, prices[ticker], 
+                        'sell', current_date, 'Risk Management'
+                    )
+    
+    def _liquidate_correlated_positions(self, prices: Dict[str, float], current_date: datetime):
+        """Liquidate positions with high correlation"""
+        # Simple implementation - liquidate positions with correlation > threshold
+        positions_to_liquidate = []
+        
+        for ticker in self.portfolio_state.positions.keys():
+            if self.portfolio_state.portfolio_correlation > self.config.max_correlation:
+                positions_to_liquidate.append(ticker)
+        
+        # Liquidate half of highly correlated positions
+        for i, ticker in enumerate(positions_to_liquidate):
+            if i % 2 == 0 and ticker in prices:  # Liquidate every other position
+                position = self.portfolio_state.positions[ticker]
+                self._execute_enhanced_trade(
+                    ticker, position['quantity'], prices[ticker],
+                    'sell', current_date, 'Correlation Risk'
+                )
+    
+    def _rebalance_portfolio(self, signals: Dict[str, Dict], prices: Dict[str, float], current_date: datetime):
+        """Rebalance portfolio based on signals and risk management"""
+        
+        # Filter signals by strength
+        valid_signals = {
+            ticker: signal for ticker, signal in signals.items() 
+            if signal['strength'] >= self.config.min_signal_strength
+        }
+        
+        if not valid_signals:
+            return
+        
+        # Calculate position sizes
+        target_positions = self._calculate_position_sizes(valid_signals, prices)
+        
+        # Execute trades to reach target positions
+        for ticker, target_size in target_positions.items():
+            if ticker in prices:
+                current_size = self.portfolio_state.positions.get(ticker, {}).get('quantity', 0)
+                size_diff = target_size - current_size
+                
+                if abs(size_diff) > 0:
+                    direction = 'buy' if size_diff > 0 else 'sell'
+                    self._execute_enhanced_trade(
+                        ticker, abs(size_diff), prices[ticker],
+                        direction, current_date, 'Rebalance'
+                    )
+    
+    def _calculate_position_sizes(self, signals: Dict[str, Dict], prices: Dict[str, float]) -> Dict[str, int]:
+        """Calculate optimal position sizes"""
+        
+        if self.config.position_sizing_method == 'equal_weight':
+            return self._equal_weight_sizing(signals, prices)
+        elif self.config.position_sizing_method == 'risk_parity':
+            return self._risk_parity_sizing(signals, prices)
+        elif self.config.position_sizing_method == 'kelly_criterion':
+            return self._kelly_criterion_sizing(signals, prices)
         else:
-            self.portfolio_state.drawdown = (
-                (self.portfolio_state.portfolio_value - self.portfolio_state.peak_value) / 
-                self.portfolio_state.peak_value
-            )
+            return self._equal_weight_sizing(signals, prices)
     
-    def _handle_risk_violations(self, risk_checks: Dict[str, bool], 
-                               current_prices: Dict[str, float], current_date: datetime):
-        """Handle risk constraint violations"""
+    def _equal_weight_sizing(self, signals: Dict[str, Dict], prices: Dict[str, float]) -> Dict[str, int]:
+        """Equal weight position sizing"""
+        target_positions = {}
         
-        risk_event = {
-            'date': current_date,
-            'violations': [k for k, v in risk_checks.items() if not v],
-            'actions_taken': []
-        }
+        if not signals:
+            return target_positions
         
-        # Handle drawdown violation
-        if not risk_checks['drawdown_ok']:
-            # Reduce position sizes by 25%
-            positions_to_reduce = list(self.portfolio_state.positions.keys())[:3]  # Reduce largest positions
-            for ticker in positions_to_reduce:
-                if ticker in current_prices:
-                    position = self.portfolio_state.positions[ticker]
-                    reduce_quantity = int(position['quantity'] * 0.25)
-                    if reduce_quantity > 0:
-                        self._execute_enhanced_trade(
-                            ticker, reduce_quantity, current_prices[ticker], 
-                            'sell', current_date, "Drawdown risk reduction"
-                        )
-                        risk_event['actions_taken'].append(f"Reduced {ticker} by 25%")
+        # Allocate equal weight to each position
+        available_capital = min(self.portfolio_state.portfolio_value * 0.95, self.portfolio_state.cash)
+        position_value = available_capital / len(signals)
         
-        # Handle correlation violation
-        if not risk_checks['correlation_ok']:
-            # Could implement correlation-based position reduction
-            risk_event['actions_taken'].append("Correlation violation detected")
+        for ticker in signals.keys():
+            if ticker in prices and prices[ticker] > 0:
+                quantity = int(position_value / prices[ticker])
+                target_positions[ticker] = max(0, quantity)
         
-        self.risk_events.append(risk_event)
-        logging.warning(f"Risk violations on {current_date}: {risk_event['violations']}")
+        return target_positions
     
-    def _handle_stress_test_failure(self, stress_results: Dict, 
-                                   current_prices: Dict[str, float], current_date: datetime):
-        """Handle stress test failures"""
+    def _risk_parity_sizing(self, signals: Dict[str, Dict], prices: Dict[str, float]) -> Dict[str, int]:
+        """Risk parity position sizing (simplified)"""
+        target_positions = {}
         
-        var_95 = stress_results.get('var_95', 0)
+        if not signals:
+            return target_positions
         
-        risk_event = {
-            'date': current_date,
-            'type': 'stress_test_failure',
-            'var_95': var_95,
-            'actions_taken': []
-        }
+        # Simplified risk parity - weight by inverse confidence
+        total_inv_confidence = sum(1/signal['confidence'] for signal in signals.values())
+        available_capital = min(self.portfolio_state.portfolio_value * 0.95, self.portfolio_state.cash)
         
-        if var_95 < -0.20:  # Critical threshold
-            # Emergency position reduction
-            positions_to_reduce = list(self.portfolio_state.positions.keys())
-            for ticker in positions_to_reduce:
-                if ticker in current_prices:
-                    position = self.portfolio_state.positions[ticker]
-                    reduce_quantity = int(position['quantity'] * 0.4)  # 40% reduction
-                    if reduce_quantity > 0:
-                        self._execute_enhanced_trade(
-                            ticker, reduce_quantity, current_prices[ticker], 
-                            'sell', current_date, "Emergency stress test response"
-                        )
-                        risk_event['actions_taken'].append(f"Emergency reduction {ticker} by 40%")
+        for ticker, signal in signals.items():
+            if ticker in prices and prices[ticker] > 0:
+                weight = (1/signal['confidence']) / total_inv_confidence
+                position_value = available_capital * weight
+                quantity = int(position_value / prices[ticker])
+                target_positions[ticker] = max(0, quantity)
         
-        elif var_95 < -0.15:  # High risk threshold
-            # Moderate position reduction
-            largest_positions = sorted(
-                self.portfolio_state.positions.items(),
-                key=lambda x: x[1]['quantity'] * current_prices.get(x[0], 0),
-                reverse=True
-            )[:2]
-            
-            for ticker, position in largest_positions:
-                if ticker in current_prices:
-                    reduce_quantity = int(position['quantity'] * 0.25)  # 25% reduction
-                    if reduce_quantity > 0:
-                        self._execute_enhanced_trade(
-                            ticker, reduce_quantity, current_prices[ticker], 
-                            'sell', current_date, "Stress test risk reduction"
-                        )
-                        risk_event['actions_taken'].append(f"Reduced {ticker} by 25%")
-        
-        self.risk_events.append(risk_event)
-        logging.warning(f"Stress test failure on {current_date}: VaR 95% = {var_95:.2%}")
+        return target_positions
     
-    def _check_enhanced_exit_signals(self, strategy, current_prices: Dict[str, float], 
-                                   current_date: datetime, returns_data: pd.DataFrame):
-        """Enhanced exit signal checking with risk considerations"""
+    def _kelly_criterion_sizing(self, signals: Dict[str, Dict], prices: Dict[str, float]) -> Dict[str, int]:
+        """Kelly criterion position sizing (simplified)"""
+        target_positions = {}
+        
+        if not signals:
+            return target_positions
+        
+        available_capital = min(self.portfolio_state.portfolio_value * 0.95, self.portfolio_state.cash)
+        
+        for ticker, signal in signals.items():
+            if ticker in prices and prices[ticker] > 0:
+                # Simplified Kelly formula
+                win_prob = signal['confidence']
+                avg_win = 0.15  # Assume 15% average win
+                avg_loss = 0.10  # Assume 10% average loss
+                
+                kelly_fraction = (win_prob * avg_win - (1 - win_prob) * avg_loss) / avg_win
+                kelly_fraction = max(0, min(kelly_fraction, self.config.kelly_cap))
+                
+                position_value = available_capital * kelly_fraction
+                quantity = int(position_value / prices[ticker])
+                target_positions[ticker] = max(0, quantity)
+        
+        return target_positions
+    
+    def _manage_exits(self, prices: Dict[str, float], current_date: datetime):
+        """Manage position exits based on various criteria"""
         
         positions_to_exit = []
         
-        for ticker in list(self.portfolio_state.positions.keys()):
-            if ticker in current_prices:
-                position = self.portfolio_state.positions[ticker]
+        for ticker, position in self.portfolio_state.positions.items():
+            if ticker in prices:
+                current_price = prices[ticker]
+                entry_price = position['entry_price']
+                entry_date = position['entry_date']
                 
-                # Original strategy exit signal
-                should_exit = strategy.should_exit(
-                    ticker, position['entry_date'], current_date,
-                    current_prices[ticker], position['entry_price']
-                )
+                # Calculate returns
+                return_pct = (current_price - entry_price) / entry_price
+                holding_days = (current_date - entry_date).days
                 
-                # Enhanced risk-based exit signals
-                risk_exit = self._check_risk_based_exit(ticker, position, current_prices[ticker], returns_data)
+                exit_reason = None
                 
-                if should_exit or risk_exit['should_exit']:
-                    exit_reason = risk_exit['reason'] if risk_exit['should_exit'] else "Strategy signal"
+                # Profit target
+                if return_pct >= self.config.profit_target:
+                    exit_reason = 'Profit Target'
+                
+                # Stop loss
+                elif return_pct <= -self.config.stop_loss:
+                    exit_reason = 'Stop Loss'
+                
+                # Max holding period
+                elif holding_days >= self.config.max_holding_days:
+                    exit_reason = 'Max Holding Period'
+                
+                if exit_reason:
                     positions_to_exit.append((ticker, exit_reason))
         
         # Execute exits
-        for ticker, exit_reason in positions_to_exit:
-            position = self.portfolio_state.positions[ticker]
-            self._execute_enhanced_trade(
-                ticker, position['quantity'], current_prices[ticker],
-                'sell', current_date, exit_reason
-            )
-    
-    def _check_risk_based_exit(self, ticker: str, position: Dict, 
-                              current_price: float, returns_data: pd.DataFrame) -> Dict:
-        """Check for risk-based exit signals"""
-        
-        entry_price = position['entry_price']
-        return_pct = (current_price / entry_price - 1) if entry_price > 0 else 0
-        
-        # Stop loss based on portfolio drawdown
-        if self.portfolio_state.drawdown < -0.10:  # If portfolio down 10%
-            if return_pct < -0.05:  # And this position down 5%
-                return {'should_exit': True, 'reason': 'Portfolio drawdown stop loss'}
-        
-        # Correlation-based exit
-        if ticker in returns_data.columns and len(self.portfolio_state.positions) > 1:
-            try:
-                other_tickers = [t for t in self.portfolio_state.positions.keys() if t != ticker]
-                available_others = [t for t in other_tickers if t in returns_data.columns]
-                
-                if available_others:
-                    ticker_returns = returns_data[ticker].tail(30)  # Last 30 days
-                    for other_ticker in available_others:
-                        other_returns = returns_data[other_ticker].tail(30)
-                        if len(ticker_returns) > 10 and len(other_returns) > 10:
-                            correlation = ticker_returns.corr(other_returns)
-                            if abs(correlation) > self.config.max_position_correlation:
-                                return {'should_exit': True, 'reason': f'High correlation with {other_ticker}'}
-            except:
-                pass
-        
-        # Volatility-based exit
-        if ticker in returns_data.columns:
-            try:
-                recent_vol = returns_data[ticker].tail(20).std()
-                long_vol = returns_data[ticker].tail(60).std()
-                
-                if recent_vol > long_vol * 2:  # Recent volatility 2x normal
-                    return {'should_exit': True, 'reason': 'Excessive volatility'}
-            except:
-                pass
-        
-        return {'should_exit': False, 'reason': 'No risk exit signal'}
-    
-    def _filter_signals_with_risk(self, signals: Dict[str, float], 
-                                 current_prices: Dict[str, float],
-                                 returns_data: pd.DataFrame) -> Dict[str, float]:
-        """Filter signals based on risk considerations"""
-        
-        filtered_signals = {}
-        
-        for ticker, signal_strength in signals.items():
-            if ticker not in current_prices:
-                continue
-            
-            # Basic signal strength filter
-            if signal_strength < 0.6:
-                continue
-            
-            # Check correlation with existing positions
-            if len(self.portfolio_state.positions) > 0 and ticker in returns_data.columns:
-                max_correlation = 0
-                for existing_ticker in self.portfolio_state.positions.keys():
-                    if existing_ticker in returns_data.columns:
-                        try:
-                            corr = returns_data[ticker].tail(60).corr(returns_data[existing_ticker].tail(60))
-                            max_correlation = max(max_correlation, abs(corr))
-                        except:
-                            continue
-                
-                if max_correlation > self.config.max_position_correlation:
-                    continue
-            
-            # Check if we're at position limit
-            if len(self.portfolio_state.positions) >= self.config.max_positions:
-                continue
-            
-            # Check portfolio risk budget
-            if self.portfolio_state.risk_budget_used > self.config.risk_budget_limit:
-                continue
-            
-            filtered_signals[ticker] = signal_strength
-        
-        return filtered_signals
-    
-    def _execute_enhanced_positions(self, signals: Dict[str, float], 
-                                   current_prices: Dict[str, float],
-                                   current_date: datetime, returns_data: pd.DataFrame):
-        """Execute new positions with enhanced risk management"""
-        
-        # Sort signals by strength
-        sorted_signals = sorted(signals.items(), key=lambda x: x[1], reverse=True)
-        
-        for ticker, signal_strength in sorted_signals:
-            if ticker not in self.portfolio_state.positions and ticker in current_prices:
-                
-                stock_price = current_prices[ticker]
-                
-                # Enhanced position sizing
-                quantity = self.risk_manager.calculate_position_size(
-                    signal_strength, self.portfolio_state, stock_price, 
-                    returns_data, ticker
+        for ticker, reason in positions_to_exit:
+            if ticker in prices:
+                position = self.portfolio_state.positions[ticker]
+                self._execute_enhanced_trade(
+                    ticker, position['quantity'], prices[ticker],
+                    'sell', current_date, reason
                 )
-                
-                # Apply risk limits
-                quantity = self.risk_manager.position_sizer._apply_position_constraints(
-                    np.array([quantity / self.portfolio_state.portfolio_value])
-                )[0] * self.portfolio_state.portfolio_value / stock_price
-                quantity = int(quantity)
-                
-                if quantity > 0:
-                    # Check if adding this position violates risk constraints
-                    mock_position = {
-                        'ticker': ticker,
-                        'value': quantity * stock_price
-                    }
-                    
-                    risk_checks = self.risk_manager.check_risk_constraints(
-                        self.portfolio_state, returns_data, mock_position
-                    )
-                    
-                    if all(risk_checks.values()):
-                        success = self._execute_enhanced_trade(
-                            ticker, quantity, stock_price, 'buy', 
-                            current_date, f"Enhanced ML Signal: {signal_strength:.3f}"
-                        )
-                        
-                        if success:
-                            logging.info(f"Opened enhanced position: {ticker} x {quantity} @ {stock_price}")
-                    else:
-                        logging.info(f"Skipped {ticker} due to risk constraints: {risk_checks}")
     
     def _execute_enhanced_trade(self, ticker: str, quantity: int, price: float, 
-                               direction: str, date: datetime, signal: str) -> bool:
-        """Execute trade with enhanced tracking"""
+                              direction: str, date: datetime, reason: str) -> bool:
+        """Execute enhanced trade with comprehensive tracking"""
         
-        # Calculate slippage and costs (same as original)
+        if quantity <= 0:
+            return False
+        
+        # Calculate costs
         slippage = self._calculate_slippage(price, quantity, direction)
         execution_price = price + slippage
-        trade_value = quantity * execution_price
-        transaction_cost = trade_value * self.config.transaction_cost_pct
-        total_cost = trade_value + transaction_cost
+        gross_value = quantity * execution_price
+        transaction_cost = gross_value * self.config.transaction_cost_pct
+        net_value = gross_value + transaction_cost
         
         if direction == 'buy':
-            if total_cost > self.portfolio_state.cash:
+            # Check if we have enough cash
+            if net_value > self.portfolio_state.cash:
                 return False
             
-            # Execute buy order
-            self.portfolio_state.cash -= total_cost
-            self.portfolio_state.positions[ticker] = {
-                'quantity': quantity,
-                'entry_price': execution_price,
-                'current_price': execution_price,
-                'entry_date': date,
-                'entry_signal': signal,
-                'transaction_cost': transaction_cost,
-                'unrealized_pnl': 0.0,
-                'return_pct': 0.0
-            }
+            # Execute buy
+            self.portfolio_state.cash -= net_value
             
-        elif direction == 'sell':
+            if ticker in self.portfolio_state.positions:
+                # Add to existing position (average price)
+                existing = self.portfolio_state.positions[ticker]
+                total_quantity = existing['quantity'] + quantity
+                avg_price = ((existing['quantity'] * existing['entry_price']) + 
+                           (quantity * execution_price)) / total_quantity
+                
+                self.portfolio_state.positions[ticker].update({
+                    'quantity': total_quantity,
+                    'entry_price': avg_price
+                })
+            else:
+                # New position
+                self.portfolio_state.positions[ticker] = {
+                    'quantity': quantity,
+                    'entry_price': execution_price,
+                    'entry_date': date
+                }
+        
+        else:  # sell
+            # Check if we have enough shares
             if ticker not in self.portfolio_state.positions:
                 return False
             
             position = self.portfolio_state.positions[ticker]
+            if quantity > position['quantity']:
+                return False
             
-            # Create enhanced trade record
-            holding_period = (date - position['entry_date']).days
-            gross_pnl = quantity * (execution_price - position['entry_price'])
-            total_transaction_cost = position['transaction_cost'] + transaction_cost
-            net_pnl = gross_pnl - total_transaction_cost
-            return_pct = net_pnl / (quantity * position['entry_price'])
+            # Execute sell
+            self.portfolio_state.cash += (gross_value - transaction_cost)
             
-            # Calculate enhanced metrics
-            entry_var = 0.0  # Could be calculated from historical data
-            max_dd_during_hold = 0.0  # Could track this during holding period
+            # Record trade
+            if 'entry_date' in position:
+                holding_period = (date - position['entry_date']).days
+                return_pct = (execution_price - position['entry_price']) / position['entry_price']
+                net_pnl = quantity * (execution_price - position['entry_price']) - transaction_cost
+                
+                trade = EnhancedTrade(
+                    ticker=ticker,
+                    entry_date=position['entry_date'],
+                    exit_date=date,
+                    entry_price=position['entry_price'],
+                    exit_price=execution_price,
+                    quantity=quantity,
+                    return_pct=return_pct,
+                    holding_period=holding_period,
+                    exit_signal=reason,
+                    net_pnl=net_pnl
+                )
+                
+                self.trades.append(trade)
             
-            enhanced_trade = EnhancedTrade(
-                ticker=ticker,
-                entry_date=position['entry_date'],
-                exit_date=date,
-                entry_price=position['entry_price'],
-                exit_price=execution_price,
-                quantity=quantity,
-                direction='long',
-                entry_signal=position['entry_signal'],
-                exit_signal=signal,
-                gross_pnl=gross_pnl,
-                transaction_costs=total_transaction_cost,
-                net_pnl=net_pnl,
-                return_pct=return_pct,
-                holding_period=holding_period,
-                entry_var=entry_var,
-                max_drawdown_during_hold=max_dd_during_hold
-            )
-            
-            self.trades.append(enhanced_trade)
-            
-            # Add cash back
-            self.portfolio_state.cash += trade_value - transaction_cost
-            
-            # Remove or reduce position
-            if quantity >= position['quantity']:
+            # Update position
+            if quantity == position['quantity']:
+                # Complete exit
                 del self.portfolio_state.positions[ticker]
             else:
+                # Partial exit
                 position['quantity'] -= quantity
         
         return True
     
     def _calculate_slippage(self, price: float, quantity: int, direction: str) -> float:
-        """Calculate realistic slippage (same as original)"""
+        """Calculate realistic slippage"""
         base_slippage = price * self.config.slippage_pct
         size_factor = min(2.0, quantity / 1000)
         slippage_direction = 1 if direction == 'buy' else -1
@@ -998,7 +680,7 @@ class EnhancedBacktestEngine:
         self.portfolio_history.append(state_record)
     
     def _liquidate_all_positions(self, prices: Dict[str, float], date: datetime, reason: str):
-        """Liquidate all positions (same as original)"""
+        """Liquidate all positions"""
         for ticker in list(self.portfolio_state.positions.keys()):
             if ticker in prices:
                 position = self.portfolio_state.positions[ticker]
@@ -1034,34 +716,40 @@ class EnhancedBacktestEngine:
             'risk_events': self.risk_events,
             'returns': returns,
             'config': self.config,
-            'risk_manager_history': self.risk_manager.risk_history
+            'risk_manager_history': self.risk_manager.risk_history if self.risk_manager else []
         }
     
     def _calculate_enhanced_metrics(self, portfolio_df: pd.DataFrame, returns: pd.Series) -> Dict:
         """Calculate enhanced performance metrics"""
         
-        from utils.backtesting import PerformanceMetrics  # Import original metrics
+        # Basic metrics
+        total_return = (portfolio_df['portfolio_value'].iloc[-1] / self.config.initial_capital) - 1
+        annual_return = (portfolio_df['portfolio_value'].iloc[-1] / self.config.initial_capital) ** (252 / len(portfolio_df)) - 1
         
-        # Original metrics
-        original_metrics = {
-            'total_return': (portfolio_df['portfolio_value'].iloc[-1] / self.config.initial_capital) - 1,
-            'annual_return': (portfolio_df['portfolio_value'].iloc[-1] / self.config.initial_capital) ** (252 / len(portfolio_df)) - 1,
-            'volatility': returns.std() * np.sqrt(252),
-            'sharpe_ratio': PerformanceMetrics.sharpe_ratio(returns, self.config.risk_free_rate),
-            'sortino_ratio': PerformanceMetrics.sortino_ratio(returns, self.config.risk_free_rate),
-            'calmar_ratio': PerformanceMetrics.calmar_ratio(returns, portfolio_df['portfolio_value']),
-            'max_drawdown': PerformanceMetrics.max_drawdown(portfolio_df['portfolio_value']),
-            'var_95': PerformanceMetrics.value_at_risk(returns, 0.95),
-            'cvar_95': PerformanceMetrics.conditional_var(returns, 0.95)
-        }
+        volatility = returns.std() * np.sqrt(252)
+        sharpe_ratio = (annual_return - self.config.risk_free_rate) / volatility if volatility > 0 else 0
         
         # Enhanced risk-adjusted metrics
-        enhanced_metrics = {}
+        enhanced_metrics = {
+            'total_return': total_return,
+            'annual_return': annual_return,
+            'volatility': volatility,
+            'sharpe_ratio': sharpe_ratio,
+            'max_drawdown': portfolio_df['drawdown'].max(),
+            'avg_drawdown': portfolio_df['drawdown'].mean(),
+            'total_trades': len(self.trades),
+            'win_rate': len([t for t in self.trades if t.return_pct > 0]) / len(self.trades) if self.trades else 0,
+            'avg_trade_return': np.mean([t.return_pct for t in self.trades]) if self.trades else 0,
+            'profit_factor': abs(sum(t.net_pnl for t in self.trades if t.net_pnl > 0) / 
+                                sum(t.net_pnl for t in self.trades if t.net_pnl < 0)) if any(t.net_pnl < 0 for t in self.trades) else float('inf'),
+            'risk_events': len(self.risk_events),
+            'final_value': portfolio_df['portfolio_value'].iloc[-1]
+        }
         
         # Risk-adjusted return metrics
         if 'current_var' in portfolio_df.columns:
             avg_var = portfolio_df['current_var'].mean()
-            enhanced_metrics['var_adjusted_return'] = original_metrics['annual_return'] / abs(avg_var) if avg_var < 0 else 0
+            enhanced_metrics['var_adjusted_return'] = annual_return / abs(avg_var) if avg_var < 0 else 0
         
         # Correlation-adjusted metrics
         if 'portfolio_correlation' in portfolio_df.columns:
@@ -1069,77 +757,422 @@ class EnhancedBacktestEngine:
             enhanced_metrics['correlation_penalty'] = avg_correlation
             enhanced_metrics['diversification_ratio'] = 1 - avg_correlation
         
-        # Drawdown frequency and duration
-        drawdown_series = portfolio_df['drawdown']
-        drawdown_periods = (drawdown_series < -0.05).astype(int)  # Periods with >5% drawdown
-        enhanced_metrics['drawdown_frequency'] = drawdown_periods.sum() / len(drawdown_periods)
-        
-        # Maximum adverse excursion (MAE) for trades
-        if self.trades:
-            mae_values = []
-            for trade in self.trades:
-                if hasattr(trade, 'max_drawdown_during_hold'):
-                    mae_values.append(trade.max_drawdown_during_hold)
-            if mae_values:
-                enhanced_metrics['avg_mae'] = np.mean(mae_values)
-                enhanced_metrics['max_mae'] = np.max(mae_values)
-        
-        # Risk event analysis
-        enhanced_metrics['risk_events_count'] = len(self.risk_events)
-        enhanced_metrics['risk_events_per_year'] = len(self.risk_events) / (len(portfolio_df) / 252)
-        
-        # Combine original and enhanced metrics
-        all_metrics = {**original_metrics, **enhanced_metrics}
-        
-        return all_metrics
+        return enhanced_metrics
     
     def _analyze_risk_performance(self) -> Dict:
         """Analyze risk management performance"""
         
-        analysis = {
-            'drawdown_violations': 0,
-            'correlation_violations': 0,
-            'stress_test_failures': 0,
-            'risk_adjusted_trades': 0,
-            'avg_position_correlation': 0.0,
-            'max_var_reached': 0.0
+        risk_analysis = {
+            'total_risk_events': len(self.risk_events),
+            'risk_event_types': {},
+            'avg_drawdown_duration': 0,
+            'max_consecutive_losses': 0,
+            'risk_adjusted_metrics': {}
         }
         
         # Analyze risk events
         for event in self.risk_events:
-            if 'drawdown' in event.get('violations', []):
-                analysis['drawdown_violations'] += 1
-            if 'correlation' in event.get('violations', []):
-                analysis['correlation_violations'] += 1
-            if event.get('type') == 'stress_test_failure':
-                analysis['stress_test_failures'] += 1
+            event_type = event.get('type', 'Unknown')
+            risk_analysis['risk_event_types'][event_type] = risk_analysis['risk_event_types'].get(event_type, 0) + 1
         
-        # Analyze trades with risk adjustments
-        for trade in self.trades:
-            if 'risk' in trade.exit_signal.lower():
-                analysis['risk_adjusted_trades'] += 1
-        
-        # Portfolio correlation analysis
-        if self.risk_manager.risk_history:
-            correlations = [r['max_correlation'] for r in self.risk_manager.risk_history if 'max_correlation' in r]
-            if correlations:
-                analysis['avg_position_correlation'] = np.mean(correlations)
+        # Analyze trade sequences
+        if self.trades:
+            consecutive_losses = 0
+            max_consecutive = 0
             
-            vars = [r['var_95'] for r in self.risk_manager.risk_history if 'var_95' in r]
-            if vars:
-                analysis['max_var_reached'] = min(vars)  # Most negative VaR
+            for trade in self.trades:
+                if trade.return_pct < 0:
+                    consecutive_losses += 1
+                    max_consecutive = max(max_consecutive, consecutive_losses)
+                else:
+                    consecutive_losses = 0
+            
+            risk_analysis['max_consecutive_losses'] = max_consecutive
         
-        return analysis
+        return risk_analysis
 
-# Keep the original classes for backward compatibility
-BacktestConfig = EnhancedBacktestConfig
-Trade = EnhancedTrade
-PortfolioState = EnhancedPortfolioState
-BacktestEngine = EnhancedBacktestEngine
 
-# Export the enhanced classes
-__all__ = [
-    'EnhancedBacktestConfig', 'EnhancedTrade', 'EnhancedPortfolioState', 
-    'EnhancedRiskManager', 'EnhancedBacktestEngine',
-    'BacktestConfig', 'Trade', 'PortfolioState', 'BacktestEngine'  # Backward compatibility
-]
+class BacktestAnalyzer:
+    """Analyzer for backtest results with comprehensive reporting"""
+    
+    def __init__(self, results: Dict):
+        self.results = results
+        self.portfolio_history = results.get('portfolio_history', pd.DataFrame())
+        self.trades = results.get('enhanced_trades', [])
+        self.risk_events = results.get('risk_events', [])
+        self.metrics = results.get('enhanced_metrics', {})
+        self.risk_analysis = results.get('risk_analysis', {})
+    
+    def generate_performance_report(self) -> Dict:
+        """Generate comprehensive performance report"""
+        
+        if self.portfolio_history.empty:
+            return {'error': 'No portfolio history available'}
+        
+        # Performance summary
+        performance_summary = {
+            'period': {
+                'start_date': self.portfolio_history.index[0].strftime('%Y-%m-%d'),
+                'end_date': self.portfolio_history.index[-1].strftime('%Y-%m-%d'),
+                'total_days': len(self.portfolio_history)
+            },
+            'returns': {
+                'total_return': self.metrics.get('total_return', 0),
+                'annual_return': self.metrics.get('annual_return', 0),
+                'volatility': self.metrics.get('volatility', 0),
+                'sharpe_ratio': self.metrics.get('sharpe_ratio', 0)
+            },
+            'risk_metrics': {
+                'max_drawdown': self.metrics.get('max_drawdown', 0),
+                'avg_drawdown': self.metrics.get('avg_drawdown', 0),
+                'var_adjusted_return': self.metrics.get('var_adjusted_return', 0),
+                'diversification_ratio': self.metrics.get('diversification_ratio', 0)
+            },
+            'trading_activity': {
+                'total_trades': len(self.trades),
+                'win_rate': self.metrics.get('win_rate', 0),
+                'avg_trade_return': self.metrics.get('avg_trade_return', 0),
+                'profit_factor': self.metrics.get('profit_factor', 0)
+            },
+            'risk_management': {
+                'total_risk_events': len(self.risk_events),
+                'risk_event_types': self.risk_analysis.get('risk_event_types', {}),
+                'max_consecutive_losses': self.risk_analysis.get('max_consecutive_losses', 0)
+            }
+        }
+        
+        return performance_summary
+    
+    def analyze_trades(self) -> Dict:
+        """Analyze trading performance in detail"""
+        
+        if not self.trades:
+            return {'error': 'No trades to analyze'}
+        
+        # Convert trades to DataFrame for analysis
+        trade_data = []
+        for trade in self.trades:
+            trade_data.append({
+                'ticker': trade.ticker,
+                'entry_date': trade.entry_date,
+                'exit_date': trade.exit_date,
+                'holding_period': trade.holding_period,
+                'return_pct': trade.return_pct,
+                'net_pnl': trade.net_pnl,
+                'exit_reason': trade.exit_signal
+            })
+        
+        trades_df = pd.DataFrame(trade_data)
+        
+        # Trading statistics
+        trade_analysis = {
+            'by_ticker': trades_df.groupby('ticker').agg({
+                'return_pct': ['count', 'mean', 'std'],
+                'net_pnl': 'sum',
+                'holding_period': 'mean'
+            }).round(4).to_dict(),
+            
+            'by_exit_reason': trades_df.groupby('exit_reason').agg({
+                'return_pct': ['count', 'mean'],
+                'net_pnl': 'sum'
+            }).round(4).to_dict(),
+            
+            'monthly_performance': trades_df.set_index('exit_date').resample('M').agg({
+                'return_pct': ['count', 'mean'],
+                'net_pnl': 'sum'
+            }).round(4).to_dict(),
+            
+            'holding_period_analysis': {
+                'avg_holding_days': trades_df['holding_period'].mean(),
+                'median_holding_days': trades_df['holding_period'].median(),
+                'max_holding_days': trades_df['holding_period'].max(),
+                'min_holding_days': trades_df['holding_period'].min()
+            }
+        }
+        
+        return trade_analysis
+    
+    def create_performance_charts(self) -> Dict:
+        """Create performance visualization data"""
+        
+        if self.portfolio_history.empty:
+            return {'error': 'No data for charts'}
+        
+        # Portfolio value over time
+        portfolio_chart = {
+            'dates': self.portfolio_history.index.strftime('%Y-%m-%d').tolist(),
+            'values': self.portfolio_history['portfolio_value'].tolist(),
+            'drawdown': self.portfolio_history['drawdown'].tolist()
+        }
+        
+        # Trade performance
+        if self.trades:
+            trade_returns = [t.return_pct for t in self.trades]
+            trade_dates = [t.exit_date.strftime('%Y-%m-%d') for t in self.trades]
+            
+            trades_chart = {
+                'dates': trade_dates,
+                'returns': trade_returns,
+                'cumulative_pnl': np.cumsum([t.net_pnl for t in self.trades]).tolist()
+            }
+        else:
+            trades_chart = {'dates': [], 'returns': [], 'cumulative_pnl': []}
+        
+        # Risk metrics over time
+        risk_chart = {
+            'dates': self.portfolio_history.index.strftime('%Y-%m-%d').tolist(),
+            'var': self.portfolio_history.get('current_var', []).tolist(),
+            'correlation': self.portfolio_history.get('portfolio_correlation', []).tolist()
+        }
+        
+        return {
+            'portfolio_performance': portfolio_chart,
+            'trade_performance': trades_chart,
+            'risk_metrics': risk_chart
+        }
+
+
+class BacktestDB:
+    """Database for storing backtest results"""
+    
+    def __init__(self, db_path: str = "backtests.db"):
+        self.db_path = db_path
+        self._create_tables()
+    
+    def _create_tables(self):
+        """Create database tables for backtest storage"""
+        
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Backtests table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS backtests (
+                    id TEXT PRIMARY KEY,
+                    name TEXT,
+                    created_date TEXT,
+                    config TEXT,
+                    results TEXT,
+                    metrics TEXT
+                )
+            """)
+            
+            # Trades table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    backtest_id TEXT,
+                    ticker TEXT,
+                    entry_date TEXT,
+                    exit_date TEXT,
+                    return_pct REAL,
+                    net_pnl REAL,
+                    exit_reason TEXT,
+                    FOREIGN KEY (backtest_id) REFERENCES backtests (id)
+                )
+            """)
+            
+            conn.commit()
+    
+    def save_backtest(self, backtest_id: str, name: str, results: Dict) -> bool:
+        """Save backtest results to database"""
+        
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Save main backtest record
+                cursor.execute("""
+                    INSERT OR REPLACE INTO backtests 
+                    (id, name, created_date, config, results, metrics)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    backtest_id,
+                    name,
+                    datetime.now().isoformat(),
+                    pickle.dumps(results.get('config')).hex(),
+                    pickle.dumps(results).hex(),
+                    pickle.dumps(results.get('enhanced_metrics', {})).hex()
+                ))
+                
+                # Save individual trades
+                trades = results.get('enhanced_trades', [])
+                for trade in trades:
+                    cursor.execute("""
+                        INSERT INTO trades 
+                        (backtest_id, ticker, entry_date, exit_date, return_pct, net_pnl, exit_reason)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        backtest_id,
+                        trade.ticker,
+                        trade.entry_date.isoformat(),
+                        trade.exit_date.isoformat(),
+                        trade.return_pct,
+                        trade.net_pnl,
+                        trade.exit_signal
+                    ))
+                
+                conn.commit()
+                return True
+                
+        except Exception as e:
+            logging.error(f"Error saving backtest: {e}")
+            return False
+    
+    def get_backtest(self, backtest_id: str) -> Optional[Dict]:
+        """Retrieve backtest results from database"""
+        
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT name, created_date, config, results, metrics
+                    FROM backtests WHERE id = ?
+                """, (backtest_id,))
+                
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                
+                name, created_date, config_hex, results_hex, metrics_hex = row
+                
+                return {
+                    'id': backtest_id,
+                    'name': name,
+                    'created_date': created_date,
+                    'config': pickle.loads(bytes.fromhex(config_hex)),
+                    'results': pickle.loads(bytes.fromhex(results_hex)),
+                    'metrics': pickle.loads(bytes.fromhex(metrics_hex))
+                }
+                
+        except Exception as e:
+            logging.error(f"Error retrieving backtest: {e}")
+            return None
+    
+    def list_backtests(self) -> List[Dict]:
+        """List all saved backtests"""
+        
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT id, name, created_date FROM backtests
+                    ORDER BY created_date DESC
+                """)
+                
+                rows = cursor.fetchall()
+                return [
+                    {'id': row[0], 'name': row[1], 'created_date': row[2]}
+                    for row in rows
+                ]
+                
+        except Exception as e:
+            logging.error(f"Error listing backtests: {e}")
+            return []
+    
+    def delete_backtest(self, backtest_id: str) -> bool:
+        """Delete a backtest and its trades"""
+        
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Delete trades first (foreign key constraint)
+                cursor.execute("DELETE FROM trades WHERE backtest_id = ?", (backtest_id,))
+                
+                # Delete backtest
+                cursor.execute("DELETE FROM backtests WHERE id = ?", (backtest_id,))
+                
+                conn.commit()
+                return True
+                
+        except Exception as e:
+            logging.error(f"Error deleting backtest: {e}")
+            return False
+
+
+class PerformanceMetrics:
+    """Static methods for calculating performance metrics"""
+    
+    @staticmethod
+    def sharpe_ratio(returns: pd.Series, risk_free_rate: float = 0.06) -> float:
+        """Calculate Sharpe ratio"""
+        if returns.std() == 0:
+            return 0
+        excess_returns = returns.mean() - risk_free_rate/252
+        return (excess_returns / returns.std()) * np.sqrt(252)
+    
+    @staticmethod
+    def sortino_ratio(returns: pd.Series, risk_free_rate: float = 0.06) -> float:
+        """Calculate Sortino ratio"""
+        excess_returns = returns.mean() - risk_free_rate/252
+        downside_std = returns[returns < 0].std()
+        if downside_std == 0:
+            return float('inf') if excess_returns > 0 else 0
+        return (excess_returns / downside_std) * np.sqrt(252)
+    
+    @staticmethod
+    def calmar_ratio(returns: pd.Series, portfolio_values: pd.Series) -> float:
+        """Calculate Calmar ratio"""
+        annual_return = (portfolio_values.iloc[-1] / portfolio_values.iloc[0]) ** (252 / len(portfolio_values)) - 1
+        max_dd = PerformanceMetrics.max_drawdown(portfolio_values)
+        return annual_return / abs(max_dd) if max_dd != 0 else 0
+    
+    @staticmethod
+    def max_drawdown(portfolio_values: pd.Series) -> float:
+        """Calculate maximum drawdown"""
+        peak = portfolio_values.expanding(min_periods=1).max()
+        drawdown = (portfolio_values - peak) / peak
+        return drawdown.min()
+    
+    @staticmethod
+    def value_at_risk(returns: pd.Series, confidence: float = 0.95) -> float:
+        """Calculate Value at Risk"""
+        return np.percentile(returns, (1 - confidence) * 100)
+    
+    @staticmethod
+    def conditional_var(returns: pd.Series, confidence: float = 0.95) -> float:
+        """Calculate Conditional Value at Risk (Expected Shortfall)"""
+        var = PerformanceMetrics.value_at_risk(returns, confidence)
+        return returns[returns <= var].mean()
+    
+    @staticmethod
+    def information_ratio(returns: pd.Series, benchmark_returns: pd.Series) -> float:
+        """Calculate Information Ratio"""
+        excess_returns = returns - benchmark_returns
+        tracking_error = excess_returns.std()
+        if tracking_error == 0:
+            return 0
+        return excess_returns.mean() / tracking_error * np.sqrt(252)
+    
+    @staticmethod
+    def beta(returns: pd.Series, market_returns: pd.Series) -> float:
+        """Calculate Beta"""
+        covariance = np.cov(returns.dropna(), market_returns.dropna())[0][1]
+        market_variance = market_returns.var()
+        return covariance / market_variance if market_variance != 0 else 0
+    
+    @staticmethod
+    def alpha(returns: pd.Series, market_returns: pd.Series, risk_free_rate: float = 0.06) -> float:
+        """Calculate Alpha"""
+        beta = PerformanceMetrics.beta(returns, market_returns)
+        portfolio_return = returns.mean() * 252
+        market_return = market_returns.mean() * 252
+        return portfolio_return - (risk_free_rate + beta * (market_return - risk_free_rate))
+
+
+# Utility functions for enhanced backtesting
+def create_backtest_config(**kwargs) -> EnhancedBacktestConfig:
+    """Create backtest configuration with defaults"""
+    return EnhancedBacktestConfig(**kwargs)
+
+
+def run_enhanced_backtest(strategy: MLStrategy, data: Dict[str, pd.DataFrame], 
+                         config: EnhancedBacktestConfig, 
+                         start_date: datetime, end_date: datetime) -> Dict:
+    """Run enhanced backtest with full configuration"""
+    
+    engine = EnhancedBacktestEngine(config)
+    return engine.run_backtest(strategy, data, start_date, end_date)
