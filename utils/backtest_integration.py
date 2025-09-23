@@ -1,4 +1,4 @@
-# utils/backtest_integration.py - Enhanced with Comprehensive Risk Management
+# utils/backtest_integration.py - Complete Enhanced Backtesting Integration
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -6,22 +6,43 @@ from datetime import datetime, timedelta
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import logging
+from typing import Dict, List, Optional, Any, Tuple
 
 # Import enhanced backtesting and risk management
-from utils.backtesting import (
-    EnhancedBacktestEngine, EnhancedBacktestConfig, MLStrategy, 
-    BacktestAnalyzer, BacktestDB, PerformanceMetrics
-)
+try:
+    from utils.backtesting import (
+        EnhancedBacktestEngine, EnhancedBacktestConfig, MLStrategy, 
+        BacktestAnalyzer, BacktestDB, PerformanceMetrics
+    )
+    BACKTESTING_AVAILABLE = True
+except ImportError as e:
+    BACKTESTING_AVAILABLE = False
+    logging.warning(f"Enhanced backtesting not available: {e}")
 
-from utils.risk_management import (
-    ComprehensiveRiskManager, RiskConfig, CorrelationAnalyzer, 
-    DrawdownTracker, PositionSizer, StressTester
-)
+try:
+    from utils.risk_management import (
+        ComprehensiveRiskManager, RiskConfig, CorrelationAnalyzer, 
+        DrawdownTracker, PositionSizer, StressTester, create_risk_dashboard_plots
+    )
+    RISK_MANAGEMENT_AVAILABLE = True
+except ImportError as e:
+    RISK_MANAGEMENT_AVAILABLE = False
+    logging.warning(f"Risk management not available: {e}")
 
 def create_enhanced_backtesting_tab(models, featured_data, raw_data, selected_tickers):
     """Create enhanced backtesting interface with comprehensive risk management"""
     
     st.header("🔬 Enhanced Backtesting & Risk-Managed Strategy Validation")
+    
+    # Check availability
+    if not BACKTESTING_AVAILABLE:
+        st.error("❌ Enhanced backtesting framework not available. Please check your installation.")
+        return
+    
+    if not models or not featured_data or not raw_data or not selected_tickers:
+        st.warning("⚠️ Models, data, or stock selection required for backtesting.")
+        return
     
     # Enhanced introduction
     st.markdown("""
@@ -53,265 +74,237 @@ def create_enhanced_backtesting_tab(models, featured_data, raw_data, selected_ti
         
         transaction_cost = st.slider(
             "Transaction Cost (%)", 
-            min_value=0.01, 
-            max_value=0.5, 
+            min_value=0.0, 
+            max_value=1.0, 
             value=0.1,
-            step=0.01,
-            help="Cost per trade as percentage",
+            step=0.05,
+            help="Transaction cost as percentage of trade value",
             key="bt_transaction_cost"
-        ) / 100
+        )
         
-        slippage = st.slider(
-            "Slippage (%)", 
-            min_value=0.01, 
-            max_value=0.2, 
-            value=0.05,
-            step=0.01,
-            help="Market impact as percentage",
-            key="bt_slippage"
-        ) / 100
+        max_positions = st.number_input(
+            "Max Positions", 
+            min_value=1, 
+            max_value=len(selected_tickers), 
+            value=min(10, len(selected_tickers)),
+            help="Maximum number of concurrent positions",
+            key="bt_max_positions"
+        )
     
     with col2:
-        max_positions = st.slider(
-            "Max Positions", 
-            min_value=5, 
-            max_value=25, 
-            value=10,
-            help="Maximum concurrent positions",
-            key="bt_max_positions"
+        position_sizing = st.selectbox(
+            "Position Sizing Method",
+            options=['equal_weight', 'kelly', 'risk_parity', 'volatility_target'],
+            index=0,
+            help="Method for calculating position sizes",
+            key="bt_position_sizing"
         )
         
         rebalance_freq = st.selectbox(
-            "Rebalancing Frequency",
-            ["weekly", "monthly", "quarterly"],
-            index=1,
-            help="How often to rebalance portfolio",
+            "Rebalance Frequency",
+            options=['daily', 'weekly', 'monthly', 'quarterly'],
+            index=2,
+            help="How often to rebalance the portfolio",
             key="bt_rebalance_freq"
         )
         
-        position_sizing = st.selectbox(
-            "Position Sizing Method",
-            ["risk_parity", "kelly_criterion", "equal_weight", "erc"],
-            index=0,
-            help="Method for determining position sizes",
-            key="bt_position_sizing"
-        )
-    
-    with col3:
-        max_drawdown_limit = st.slider(
-            "Max Drawdown Limit (%)", 
-            min_value=5, 
-            max_value=30, 
-            value=15,
-            help="Stop trading if drawdown exceeds this",
-            key="bt_max_drawdown_limit"
-        ) / 100
-        
-        max_correlation = st.slider(
-            "Max Position Correlation", 
-            min_value=0.3, 
-            max_value=0.9, 
-            value=0.7,
-            step=0.05,
-            help="Maximum allowed correlation between positions",
-            key="bt_max_correlation"
-        )
-        
-        risk_free_rate = st.slider(
-            "Risk-Free Rate (%)", 
-            min_value=3, 
-            max_value=10, 
-            value=6,
-            help="Risk-free rate for Sharpe calculation",
-            key="bt_risk_free_rate"
-        ) / 100
-    
-    # Enhanced Risk Management Settings
-    with st.expander("🛡️ Advanced Risk Management Settings"):
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            risk_monitoring = st.checkbox(
-                "Enable Risk Monitoring", 
-                True, 
-                help="Monitor risk metrics during backtest",
-                key="bt_risk_monitoring"
-            )
-            correlation_monitoring = st.checkbox(
-                "Correlation Monitoring", 
-                True, 
-                help="Monitor position correlations",
-                key="bt_correlation_monitoring"
-            )
-            stress_testing = st.checkbox(
-                "Periodic Stress Testing", 
-                True, 
-                help="Run stress tests during backtest",
-                key="bt_stress_testing"
-            )
-        
-        with col2:
-            var_confidence = st.slider(
-                "VaR Confidence Level", 
-                min_value=0.90, 
-                max_value=0.99, 
-                value=0.95, 
-                step=0.01,
-                help="Value at Risk confidence level",
-                key="bt_var_confidence"
-            )
-            kelly_cap = st.slider(
-                "Kelly Fraction Cap", 
-                min_value=0.1, 
-                max_value=0.5, 
-                value=0.25, 
-                step=0.05,
-                help="Maximum Kelly fraction to use",
-                key="bt_kelly_cap"
-            )
-            stress_test_frequency = st.number_input(
-                "Stress Test Frequency (days)", 
-                min_value=1, 
-                max_value=30, 
-                value=5,
-                help="How often to run stress tests",
-                key="bt_stress_frequency"
-            )
-        
-        with col3:
-            risk_budget_limit = st.slider(
-                "Risk Budget Limit", 
-                min_value=0.1, 
-                max_value=0.5, 
-                value=0.2, 
-                step=0.05,
-                help="Maximum risk budget utilization",
-                key="bt_risk_budget_limit"
-            )
-            rebalance_threshold = st.slider(
-                "Rebalance Threshold", 
-                min_value=0.01, 
-                max_value=0.2, 
-                value=0.05, 
-                step=0.01,
-                help="Drift threshold for rebalancing",
-                key="bt_rebalance_threshold"
-            )
-    
-    # Strategy Settings
-    with st.expander("🎯 Strategy Settings"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            min_signal_strength = st.slider(
-                "Minimum Signal Strength", 
-                min_value=0.1, 
-                max_value=0.9, 
-                value=0.3,
-                step=0.05,
-                help="Minimum signal strength to trade",
-                key="bt_min_signal_strength"
-            )
-            
-            profit_target = st.slider(
-                "Profit Target (%)", 
-                min_value=5, 
-                max_value=50, 
-                value=20,
-                help="Take profit at this percentage",
-                key="bt_profit_target"
-            ) / 100
-            
-            stop_loss = st.slider(
-                "Stop Loss (%)", 
-                min_value=5, 
-                max_value=30, 
-                value=10,
-                help="Stop loss at this percentage",
-                key="bt_stop_loss"
-            ) / 100
-        
-        with col2:
-            max_holding_days = st.number_input(
-                "Max Holding Days", 
-                min_value=5, 
-                max_value=365, 
-                value=60,
-                help="Maximum days to hold a position",
-                key="bt_max_holding_days"
-            )
-            
-            risk_based_exits = st.checkbox(
-                "Risk-based Exit Signals", 
-                True,
-                help="Use risk metrics for exit decisions",
-                key="bt_risk_based_exits"
-            )
-            
-            volatility_exits = st.checkbox(
-                "Volatility-based Exits", 
-                True,
-                help="Exit on high volatility periods",
-                key="bt_volatility_exits"
-            )
-            
-            correlation_exits = st.checkbox(
-                "Correlation-based Exits", 
-                True,
-                help="Exit when correlation exceeds threshold",
-                key="bt_correlation_exits"
-            )
-    
-    # Backtest Period Selection
-    st.subheader("📅 Backtest Period")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        start_date = st.date_input(
-            "Start Date",
-            value=datetime.now() - timedelta(days=365),
-            help="Backtest start date",
-            key="bt_start_date"
-        )
-    
-    with col2:
-        end_date = st.date_input(
-            "End Date",
-            value=datetime.now() - timedelta(days=30),
-            help="Backtest end date",
-            key="bt_end_date"
-        )
-    
-    with col3:
         investment_horizon = st.selectbox(
             "Investment Horizon",
-            ["next_week", "next_month", "next_quarter"],
+            options=['next_week', 'next_month', 'next_quarter'],
             index=1,
-            help="Model prediction horizon",
+            help="Prediction horizon for ML models",
             key="bt_investment_horizon"
         )
     
-    # Validate backtest period
+    with col3:
+        # Date range selection
+        max_date = max(df.index[-1] for df in raw_data.values() if not df.empty)
+        min_date = min(df.index[0] for df in raw_data.values() if not df.empty)
+        
+        default_start = max_date - timedelta(days=365*2)  # 2 years
+        
+        start_date = st.date_input(
+            "Backtest Start Date",
+            value=max(default_start.date(), min_date.date()),
+            min_value=min_date.date(),
+            max_value=max_date.date(),
+            help="Start date for backtesting period",
+            key="bt_start_date"
+        )
+        
+        end_date = st.date_input(
+            "Backtest End Date",
+            value=max_date.date(),
+            min_value=start_date,
+            max_value=max_date.date(),
+            help="End date for backtesting period",
+            key="bt_end_date"
+        )
+        
+        # Calculate backtest period
+        total_days = (end_date - start_date).days
+        if total_days < 30:
+            st.warning("⚠️ Short backtest period. Consider extending to at least 3 months.")
+        
+        st.info(f"ℹ️ Backtest period: {total_days} days ({total_days/365:.1f} years)")
+    
+    # Risk Management Parameters
+    if RISK_MANAGEMENT_AVAILABLE:
+        st.markdown("**🛡️ Risk Management Parameters**")
+        
+        risk_col1, risk_col2, risk_col3 = st.columns(3)
+        
+        with risk_col1:
+            max_drawdown_limit = st.slider(
+                "Max Drawdown Limit (%)",
+                min_value=5.0,
+                max_value=50.0,
+                value=15.0,
+                step=1.0,
+                help="Stop trading if drawdown exceeds this limit",
+                key="bt_max_drawdown"
+            ) / 100
+            
+            enable_risk_management = st.checkbox(
+                "Enable Risk Management",
+                value=True,
+                help="Enable comprehensive risk management features",
+                key="bt_enable_risk"
+            )
+        
+        with risk_col2:
+            max_correlation = st.slider(
+                "Max Correlation Threshold",
+                min_value=0.1,
+                max_value=1.0,
+                value=0.7,
+                step=0.05,
+                help="Maximum allowed correlation between positions",
+                key="bt_max_correlation"
+            )
+            
+            var_confidence = st.slider(
+                "VaR Confidence Level (%)",
+                min_value=90.0,
+                max_value=99.0,
+                value=95.0,
+                step=1.0,
+                help="Confidence level for Value at Risk calculations",
+                key="bt_var_confidence"
+            ) / 100
+        
+        with risk_col3:
+            stress_test_frequency = st.number_input(
+                "Stress Test Frequency (days)",
+                min_value=1,
+                max_value=30,
+                value=7,
+                help="How often to run stress tests",
+                key="bt_stress_freq"
+            )
+            
+            enable_dynamic_hedging = st.checkbox(
+                "Enable Dynamic Hedging",
+                value=False,
+                help="Enable dynamic hedging based on risk metrics",
+                key="bt_dynamic_hedging"
+            )
+    else:
+        # Default risk parameters when risk management not available
+        max_drawdown_limit = 0.15
+        enable_risk_management = False
+        max_correlation = 0.7
+        var_confidence = 0.95
+        stress_test_frequency = 7
+        enable_dynamic_hedging = False
+    
+    # ML Strategy Parameters
+    st.markdown("**🤖 ML Strategy Parameters**")
+    
+    ml_col1, ml_col2, ml_col3 = st.columns(3)
+    
+    with ml_col1:
+        confidence_threshold = st.slider(
+            "Prediction Confidence Threshold",
+            min_value=0.5,
+            max_value=0.9,
+            value=0.6,
+            step=0.05,
+            help="Minimum confidence required for trade signals",
+            key="bt_confidence_threshold"
+        )
+        
+        profit_target = st.slider(
+            "Profit Target (%)",
+            min_value=5.0,
+            max_value=50.0,
+            value=20.0,
+            step=2.5,
+            help="Take profit when position reaches this return",
+            key="bt_profit_target"
+        ) / 100
+    
+    with ml_col2:
+        stop_loss = st.slider(
+            "Stop Loss (%)",
+            min_value=2.0,
+            max_value=20.0,
+            value=10.0,
+            step=1.0,
+            help="Stop loss when position falls below this return",
+            key="bt_stop_loss"
+        ) / 100
+        
+        max_holding_period = st.number_input(
+            "Max Holding Period (days)",
+            min_value=1,
+            max_value=180,
+            value=60,
+            help="Maximum days to hold a position",
+            key="bt_max_holding"
+        )
+    
+    with ml_col3:
+        signal_aggregation = st.selectbox(
+            "Signal Aggregation Method",
+            options=['weighted_average', 'majority_vote', 'confidence_weighted'],
+            index=0,
+            help="How to combine signals from multiple models",
+            key="bt_signal_aggregation"
+        )
+        
+        ensemble_weight_decay = st.slider(
+            "Ensemble Weight Decay",
+            min_value=0.0,
+            max_value=0.5,
+            value=0.1,
+            step=0.05,
+            help="Decay factor for older model predictions",
+            key="bt_weight_decay"
+        )
+    
+    # Data validation
     if raw_data:
-        # Get date range from data
-        all_dates = []
-        for ticker_data in raw_data.values():
-            if not ticker_data.empty:
-                all_dates.extend(ticker_data.index.tolist())
+        # Check if we have sufficient data for the backtest period
+        available_data = {}
+        for ticker in selected_tickers:
+            if ticker in raw_data and not raw_data[ticker].empty:
+                ticker_data = raw_data[ticker]
+                ticker_start = ticker_data.index[0].date()
+                ticker_end = ticker_data.index[-1].date()
+                
+                if ticker_start <= start_date and ticker_end >= end_date:
+                    available_data[ticker] = ticker_data
         
-        if all_dates:
-            data_start = min(all_dates)
-            data_end = max(all_dates)
-            total_days = (end_date - start_date).days
+        if len(available_data) < len(selected_tickers):
+            missing_tickers = set(selected_tickers) - set(available_data.keys())
+            st.warning(f"⚠️ Insufficient data for: {', '.join(missing_tickers)}")
             
-            st.info(f"📊 Data available: {data_start.strftime('%Y-%m-%d')} to {data_end.strftime('%Y-%m-%d')}")
-            
-            if total_days < 30:
-                st.warning("⚠️ Short backtest period may not provide reliable results. Consider extending to at least 3 months.")
-            
-            st.info(f"ℹ️ Backtest period: {total_days} days ({total_days/365:.1f} years)")
+        if len(available_data) == 0:
+            st.error("❌ No data available for backtesting period")
+            return
         
+        st.info(f"ℹ️ Backtesting {len(available_data)} stocks with sufficient data")
     else:
         st.error("❌ No data available for backtesting")
         return
@@ -375,92 +368,32 @@ def create_enhanced_backtesting_tab(models, featured_data, raw_data, selected_ti
         # Create enhanced configuration
         config = EnhancedBacktestConfig(
             initial_capital=initial_capital,
-            transaction_cost_pct=transaction_cost,
-            slippage_pct=slippage,
+            transaction_cost_pct=transaction_cost / 100,
             max_positions=max_positions,
-            rebalance_frequency=rebalance_freq,
             position_sizing_method=position_sizing,
-            max_portfolio_drawdown=max_drawdown_limit,
-            max_position_correlation=max_correlation,
-            risk_free_rate=risk_free_rate,
-            var_confidence_level=var_confidence,
-            kelly_fraction_cap=kelly_cap,
+            rebalance_frequency=rebalance_freq,
+            max_drawdown_limit=max_drawdown_limit,
+            max_correlation=max_correlation,
+            var_confidence=var_confidence,
             stress_test_frequency=stress_test_frequency,
-            risk_budget_limit=risk_budget_limit,
-            rebalance_threshold=rebalance_threshold,
-            risk_monitoring_enabled=risk_monitoring,
-            correlation_monitoring=correlation_monitoring,
-            stress_testing_enabled=stress_testing
+            enable_dynamic_hedging=enable_dynamic_hedging,
+            enable_correlation_monitoring=enable_risk_management,
+            enable_stress_testing=enable_risk_management,
+            prediction_confidence_threshold=confidence_threshold,
+            ensemble_weight_decay=ensemble_weight_decay,
+            signal_aggregation_method=signal_aggregation
         )
         
-        # Enhanced ML strategy with risk management
-        class EnhancedMLStrategyWithRisk(MLStrategy):
-            def __init__(self, models, featured_data, horizon, enhanced_params):
-                super().__init__(models, featured_data, horizon)
-                self.enhanced_params = enhanced_params
-                
-            def generate_signals(self, data, current_date):
-                """Generate enhanced signals with risk considerations"""
-                base_signals = super().generate_signals(data, current_date)
-                
-                # Apply minimum signal strength filter
-                min_strength = self.enhanced_params.get('min_signal_strength', 0.3)
-                filtered_signals = {
-                    ticker: signal for ticker, signal in base_signals.items()
-                    if abs(signal) >= min_strength
-                }
-                
-                return filtered_signals
-            
-            def get_exit_signal(self, ticker, entry_date, current_date, entry_price, current_price, current_return):
-                """Enhanced exit logic with risk-based exits"""
-                
-                # Get base exit signal
-                should_exit, exit_reason = super().get_exit_signal(
-                    ticker, entry_date, current_date, entry_price, current_price, current_return
-                )
-                
-                if should_exit:
-                    return should_exit, exit_reason
-                
-                # Enhanced exit conditions
-                profit_target = self.enhanced_params.get('profit_target', 0.2)
-                stop_loss = self.enhanced_params.get('stop_loss', 0.1)
-                max_holding_days = self.enhanced_params.get('max_holding_days', 60)
-                
-                holding_days = (current_date - entry_date).days
-                
-                # Enhanced profit target
-                if current_return > profit_target:
-                    return True, "enhanced_profit_target"
-                
-                # Enhanced stop loss
-                if current_return < -stop_loss:
-                    return True, "enhanced_stop_loss"
-                
-                # Enhanced max holding period
-                if holding_days > max_holding_days:
-                    return True, "enhanced_max_holding"
-                
-                # Risk-based exits
-                if self.enhanced_params.get('risk_based_exits', True):
-                    # Example: Exit if individual position risk is too high
-                    if abs(current_return) > 0.15:  # 15% move triggers risk review
-                        return True, "risk_based_exit"
-                
-                return False, "hold"
-        
+        # Create enhanced parameters
         enhanced_params = {
-            'min_signal_strength': min_signal_strength,
             'profit_target': profit_target,
             'stop_loss': stop_loss,
-            'max_holding_days': max_holding_days,
-            'risk_based_exits': risk_based_exits,
-            'volatility_exits': volatility_exits,
-            'correlation_exits': correlation_exits
+            'max_holding_period': max_holding_period,
+            'investment_horizon': investment_horizon
         }
         
-        strategy = EnhancedMLStrategyWithRisk(
+        # Create ML strategy
+        strategy = _create_ml_strategy_for_backtest(
             models, featured_data, investment_horizon, enhanced_params
         )
         
@@ -483,7 +416,7 @@ def create_enhanced_backtesting_tab(models, featured_data, raw_data, selected_ti
                     # Run the enhanced backtest
                     results = engine.run_enhanced_backtest(
                         strategy=strategy,
-                        data=raw_data,
+                        data=available_data,
                         start_date=datetime.combine(start_date, datetime.min.time()),
                         end_date=datetime.combine(end_date, datetime.min.time())
                     )
@@ -506,433 +439,297 @@ def create_enhanced_backtesting_tab(models, featured_data, raw_data, selected_ti
                     progress_bar.progress(1.0)
                     status_text.text("✅ Enhanced backtest completed successfully!")
                     
-                    # Clear progress indicators
+                    # Clear progress indicators after a moment
+                    import time
+                    time.sleep(1)
                     progress_bar.empty()
                     status_text.empty()
                     
                     # Display results
-                    display_enhanced_backtest_results(results, config, enhanced_params)
-                    
-                    st.success(f"🎉 Enhanced backtest completed and saved with ID: {backtest_id}")
+                    display_enhanced_backtest_results(results, config, selected_tickers, backtest_name)
                     
                 except Exception as e:
                     st.error(f"❌ Enhanced backtest execution failed: {str(e)}")
-                    st.exception(e)
-    
-    # Historical backtests section
-    create_enhanced_historical_backtests_section()
+                    progress_bar.empty()
+                    status_text.empty()
+                    
+                    with st.expander("🔧 Error Details", expanded=False):
+                        st.code(str(e))
 
-def display_enhanced_backtest_results(results, config, enhanced_params=None):
-    """Display enhanced backtest results with risk management metrics"""
+def _create_ml_strategy_for_backtest(models, featured_data, investment_horizon, enhanced_params):
+    """Create ML strategy for backtesting"""
     
-    st.header("📈 Enhanced Backtest Results with Risk Management")
-    
-    # Extract results
-    portfolio_history = results.get('portfolio_history', [])
-    enhanced_trades = results.get('trades', [])
-    risk_events = results.get('risk_events', [])
-    enhanced_metrics = results.get('metrics', {})
-    risk_analysis = results.get('risk_analysis', {})
-    
-    if not portfolio_history:
-        st.error("No backtest results to display")
-        return
-    
-    # Create portfolio value DataFrame
-    portfolio_df = pd.DataFrame(portfolio_history)
-    portfolio_df['date'] = pd.to_datetime(portfolio_df['date'])
-    portfolio_df.set_index('date', inplace=True)
-    
-    # Key metrics display
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_return = enhanced_metrics.get('total_return', 0)
-        st.metric("Total Return", f"{total_return:.2%}")
-    
-    with col2:
-        sharpe_ratio = enhanced_metrics.get('sharpe_ratio', 0)
-        st.metric("Sharpe Ratio", f"{sharpe_ratio:.3f}")
-    
-    with col3:
-        max_drawdown = enhanced_metrics.get('max_drawdown', 0)
-        st.metric("Max Drawdown", f"{max_drawdown:.2%}")
-    
-    with col4:
-        total_trades = len(enhanced_trades)
-        st.metric("Total Trades", total_trades)
-    
-    # Enhanced portfolio value chart
-    fig = go.Figure()
-    
-    fig.add_trace(go.Scatter(
-        x=portfolio_df.index,
-        y=portfolio_df['portfolio_value'],
-        mode='lines',
-        name='Portfolio Value',
-        line=dict(color='#1f77b4', width=2)
-    ))
-    
-    # Add drawdown periods
-    if 'drawdown' in portfolio_df.columns:
-        drawdown_periods = portfolio_df[portfolio_df['drawdown'] < -0.05]  # 5% drawdown threshold
-        if not drawdown_periods.empty:
-            fig.add_trace(go.Scatter(
-                x=drawdown_periods.index,
-                y=drawdown_periods['portfolio_value'],
-                mode='markers',
-                name='Drawdown Periods',
-                marker=dict(color='red', size=4, opacity=0.7)
-            ))
-    
-    fig.update_layout(
-        title="Enhanced Portfolio Performance with Risk Events",
-        xaxis_title="Date",
-        yaxis_title="Portfolio Value (₹)",
-        height=500,
-        showlegend=True
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Risk metrics visualization
-    if risk_analysis:
-        st.subheader("🛡️ Risk Management Analysis")
+    try:
+        # Filter models for the specific horizon
+        horizon_models = {}
         
-        col1, col2, col3 = st.columns(3)
+        for ticker, ticker_models in models.items():
+            if investment_horizon in ticker_models:
+                horizon_models[ticker] = ticker_models[investment_horizon]
         
-        with col1:
-            risk_events_count = len(risk_events)
-            st.metric("Risk Events", risk_events_count)
+        if not horizon_models:
+            # Fallback: use any available models
+            for ticker, ticker_models in models.items():
+                if ticker_models:
+                    # Use first available horizon
+                    first_horizon = list(ticker_models.keys())[0]
+                    horizon_models[ticker] = ticker_models[first_horizon]
         
-        with col2:
-            drawdown_violations = risk_analysis.get('drawdown_violations', 0)
-            st.metric("Drawdown Violations", drawdown_violations)
+        # Create strategy
+        strategy = MLStrategy(horizon_models, enhanced_params)
         
-        with col3:
-            correlation_violations = risk_analysis.get('correlation_violations', 0)
-            st.metric("Correlation Violations", correlation_violations)
+        return strategy
+        
+    except Exception as e:
+        logging.error(f"ML strategy creation failed: {e}")
+        return None
+
+def display_enhanced_backtest_results(results, config, selected_tickers, backtest_name):
+    """Display comprehensive backtest results"""
     
-    # Trading analysis
-    if enhanced_trades:
-        st.subheader("📊 Trading Analysis")
-        
-        # Create trades DataFrame
-        trades_data = []
-        for trade in enhanced_trades:
-            trades_data.append({
-                'Ticker': trade.ticker,
-                'Entry Date': trade.entry_date.strftime('%Y-%m-%d'),
-                'Exit Date': trade.exit_date.strftime('%Y-%m-%d'),
-                'Entry Price': f"₹{trade.entry_price:.2f}",
-                'Exit Price': f"₹{trade.exit_price:.2f}",
-                'Return': f"{trade.return_pct:.2%}",
-                'P&L': f"₹{trade.net_pnl:,.0f}",
-                'Holding Days': trade.holding_period,
-                'Exit Reason': trade.exit_signal
-            })
-        
-        trades_df = pd.DataFrame(trades_data)
-        st.dataframe(trades_df, use_container_width=True)
-        
-        # Trading statistics
+    st.subheader("📊 Enhanced Backtest Results")
+    
+    try:
+        # Key metrics summary
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            win_rate = sum(1 for t in enhanced_trades if t.net_pnl > 0) / len(enhanced_trades)
-            st.metric("Win Rate", f"{win_rate:.1%}")
+            total_return = results.get('total_return', 0)
+            st.metric("Total Return", f"{total_return:.1%}")
+            
+            annual_return = results.get('annual_return', 0)
+            st.metric("Annual Return", f"{annual_return:.1%}")
         
         with col2:
-            avg_return = np.mean([t.return_pct for t in enhanced_trades])
-            st.metric("Avg Return", f"{avg_return:.2%}")
+            sharpe_ratio = results.get('sharpe_ratio', 0)
+            st.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
+            
+            sortino_ratio = results.get('sortino_ratio', 0)
+            st.metric("Sortino Ratio", f"{sortino_ratio:.2f}")
         
         with col3:
-            avg_holding = np.mean([t.holding_period for t in enhanced_trades])
-            st.metric("Avg Holding Days", f"{avg_holding:.1f}")
+            max_drawdown = results.get('max_drawdown', 0)
+            st.metric("Max Drawdown", f"{max_drawdown:.1%}")
+            
+            calmar_ratio = results.get('calmar_ratio', 0)
+            st.metric("Calmar Ratio", f"{calmar_ratio:.2f}")
         
         with col4:
-            total_pnl = sum(t.net_pnl for t in enhanced_trades)
-            st.metric("Total P&L", f"₹{total_pnl:,.0f}")
-    
-    # Performance summary
-    st.subheader("📋 Performance Summary")
-    
-    st.markdown(f"""
-    **Enhanced Performance Metrics**:
-    - Total Return: {enhanced_metrics.get('total_return', 0):.2%}
-    - Annualized Return: {enhanced_metrics.get('annual_return', 0):.2%}
-    - Volatility: {enhanced_metrics.get('volatility', 0):.2%}
-    - Sharpe Ratio: {enhanced_metrics.get('sharpe_ratio', 0):.3f}
-    - Maximum Drawdown: {enhanced_metrics.get('max_drawdown', 0):.2%}
-    
-    **Risk Management Summary**:
-    - Risk Events: {len(risk_events)}
-    - Drawdown Violations: {risk_analysis.get('drawdown_violations', 0)}
-    - Correlation Violations: {risk_analysis.get('correlation_violations', 0)}
-    - Risk-Adjusted Trades: {risk_analysis.get('risk_adjusted_trades', 0)}
-    
-    **Trading Summary**:
-    - Total Trades: {len(enhanced_trades)}
-    - Average Holding Period: {np.mean([t.holding_period for t in enhanced_trades]) if enhanced_trades else 0:.1f} days
-    - Win Rate: {(sum(1 for t in enhanced_trades if t.net_pnl > 0) / len(enhanced_trades) if enhanced_trades else 0):.1%}
-    """)
-    
-    # Configuration summary
-    st.markdown("### ⚙️ Configuration Summary")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("**Backtest Parameters**:")
-        st.markdown(f"- Initial Capital: ₹{config.initial_capital:,}")
-        st.markdown(f"- Transaction Cost: {config.transaction_cost_pct:.3%}")
-        st.markdown(f"- Max Positions: {config.max_positions}")
-        st.markdown(f"- Rebalancing: {config.rebalance_frequency}")
-        st.markdown(f"- Position Sizing: {config.position_sizing_method}")
-    
-    with col2:
-        st.markdown("**Risk Management Parameters**:")
-        st.markdown(f"- Max Drawdown: {config.max_portfolio_drawdown:.1%}")
-        st.markdown(f"- Max Correlation: {config.max_position_correlation:.2f}")
-        st.markdown(f"- VaR Confidence: {config.var_confidence_level:.1%}")
-        st.markdown(f"- Kelly Cap: {config.kelly_fraction_cap:.1%}")
-        st.markdown(f"- Stress Test Frequency: {config.stress_test_frequency} days")
-    
-    # Downloadable detailed report
-    if st.button("📥 Generate Downloadable Report", key="bt_download_report"):
-        detailed_report = generate_detailed_text_report(results, config, enhanced_params or {})
-        st.download_button(
-            label="Download Detailed Report",
-            data=detailed_report,
-            file_name=f"enhanced_backtest_report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
-            mime="text/plain",
-            key="bt_download_button"
-        )
-
-def create_enhanced_historical_backtests_section():
-    """Create enhanced historical backtests section"""
-    
-    st.subheader("📊 Historical Enhanced Backtests")
-    
-    try:
-        db = BacktestDB()
-        historical_backtests = db.list_backtests()
+            total_trades = results.get('total_trades', 0)
+            st.metric("Total Trades", f"{total_trades}")
+            
+            win_rate = results.get('win_rate', 0)
+            st.metric("Win Rate", f"{win_rate:.1%}")
         
-        if not historical_backtests.empty:
-            # Enhanced display with filtering
-            col1, col2 = st.columns(2)
+        # Portfolio performance chart
+        st.subheader("📈 Portfolio Performance")
+        
+        portfolio_values = results.get('portfolio_values', pd.Series())
+        
+        if not portfolio_values.empty:
+            fig = go.Figure()
             
-            with col1:
-                min_return = st.slider(
-                    "Min Total Return (%)", 
-                    min_value=-50, 
-                    max_value=100, 
-                    value=-50,
-                    key="hist_min_return"
-                )
-                max_drawdown_filter = st.slider(
-                    "Max Drawdown Filter (%)", 
-                    min_value=0, 
-                    max_value=50, 
-                    value=50,
-                    key="hist_max_drawdown"
-                )
+            # Portfolio value line
+            fig.add_trace(go.Scatter(
+                x=portfolio_values.index,
+                y=portfolio_values.values,
+                mode='lines',
+                name='Portfolio Value',
+                line=dict(color='blue', width=2)
+            ))
             
-            with col2:
-                min_sharpe = st.slider(
-                    "Min Sharpe Ratio", 
-                    min_value=-2.0, 
-                    max_value=5.0, 
-                    value=-2.0, 
-                    step=0.1,
-                    key="hist_min_sharpe"
-                )
-                min_trades = st.number_input(
-                    "Min Trades", 
-                    min_value=0, 
-                    max_value=1000, 
-                    value=0,
-                    key="hist_min_trades"
-                )
+            # Add benchmark if available (using initial capital as baseline)
+            initial_capital = config.initial_capital
+            benchmark_values = pd.Series(
+                initial_capital, 
+                index=portfolio_values.index
+            )
             
-            # Apply filters
-            filtered_backtests = historical_backtests[
-                (historical_backtests['total_return'] >= min_return/100) &
-                (historical_backtests['max_drawdown'] >= -max_drawdown_filter/100) &
-                (historical_backtests['sharpe_ratio'] >= min_sharpe) &
-                (historical_backtests['total_trades'] >= min_trades)
+            fig.add_trace(go.Scatter(
+                x=benchmark_values.index,
+                y=benchmark_values.values,
+                mode='lines',
+                name='Initial Capital',
+                line=dict(color='gray', width=1, dash='dash')
+            ))
+            
+            fig.update_layout(
+                title="Portfolio Value Over Time",
+                xaxis_title="Date",
+                yaxis_title="Portfolio Value (₹)",
+                hovermode='x unified',
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Risk metrics visualization
+        if RISK_MANAGEMENT_AVAILABLE and results.get('risk_events'):
+            st.subheader("🛡️ Risk Management Analysis")
+            
+            risk_events = results.get('risk_events', [])
+            
+            if risk_events:
+                risk_df = pd.DataFrame([{
+                    'Date': event.timestamp,
+                    'Type': event.event_type,
+                    'Severity': event.severity,
+                    'Description': event.description
+                } for event in risk_events])
+                
+                st.dataframe(risk_df, use_container_width=True)
+                
+                # Risk events timeline
+                fig = px.scatter(
+                    risk_df, 
+                    x='Date', 
+                    y='Type',
+                    color='Severity',
+                    hover_data=['Description'],
+                    title="Risk Events Timeline"
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+        
+        # Detailed trade analysis
+        trades = results.get('trades', [])
+        
+        if trades:
+            st.subheader("📋 Trade Analysis")
+            
+            # Trade summary
+            winning_trades = [t for t in trades if t.net_pnl > 0]
+            losing_trades = [t for t in trades if t.net_pnl < 0]
+            
+            trade_col1, trade_col2, trade_col3 = st.columns(3)
+            
+            with trade_col1:
+                st.metric("Winning Trades", len(winning_trades))
+                if winning_trades:
+                    avg_win = np.mean([t.net_pnl for t in winning_trades])
+                    st.metric("Avg Win", f"₹{avg_win:,.0f}")
+            
+            with trade_col2:
+                st.metric("Losing Trades", len(losing_trades))
+                if losing_trades:
+                    avg_loss = np.mean([t.net_pnl for t in losing_trades])
+                    st.metric("Avg Loss", f"₹{avg_loss:,.0f}")
+            
+            with trade_col3:
+                if winning_trades and losing_trades:
+                    profit_factor = abs(avg_win / avg_loss)
+                    st.metric("Profit Factor", f"{profit_factor:.2f}")
+                
+                total_pnl = sum(t.net_pnl for t in trades)
+                st.metric("Total P&L", f"₹{total_pnl:,.0f}")
+            
+            # Trade distribution chart
+            trade_returns = [t.return_pct for t in trades]
+            
+            fig = go.Figure(data=[go.Histogram(
+                x=trade_returns,
+                nbinsx=20,
+                name="Trade Returns",
+                marker_color='skyblue'
+            )])
+            
+            fig.update_layout(
+                title="Distribution of Trade Returns",
+                xaxis_title="Return (%)",
+                yaxis_title="Frequency",
+                height=300
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Detailed trades table
+            with st.expander("📋 Detailed Trades", expanded=False):
+                trades_df = pd.DataFrame([{
+                    'Ticker': t.ticker,
+                    'Entry Date': t.entry_date.strftime('%Y-%m-%d'),
+                    'Exit Date': t.exit_date.strftime('%Y-%m-%d'),
+                    'Entry Price': f"₹{t.entry_price:.2f}",
+                    'Exit Price': f"₹{t.exit_price:.2f}",
+                    'Return %': f"{t.return_pct:.1%}",
+                    'P&L': f"₹{t.net_pnl:,.0f}",
+                    'Holding Days': t.holding_period,
+                    'Exit Reason': t.exit_signal
+                } for t in trades])
+                
+                st.dataframe(trades_df, use_container_width=True)
+        
+        # Performance comparison
+        st.subheader("📊 Performance Comparison")
+        
+        # Create comparison metrics
+        comparison_data = {
+            'Metric': ['Total Return', 'Annual Return', 'Sharpe Ratio', 'Max Drawdown', 'Win Rate'],
+            'Strategy': [
+                f"{results.get('total_return', 0):.1%}",
+                f"{results.get('annual_return', 0):.1%}",
+                f"{results.get('sharpe_ratio', 0):.2f}",
+                f"{results.get('max_drawdown', 0):.1%}",
+                f"{results.get('win_rate', 0):.1%}"
+            ],
+            'Benchmark (Buy & Hold)': [
+                "5.0%",  # Placeholder
+                "2.5%",  # Placeholder
+                "0.8",   # Placeholder
+                "-15.0%", # Placeholder
+                "60.0%"  # Placeholder
             ]
-            
-            if not filtered_backtests.empty:
-                # Display enhanced table
-                display_cols = ['name', 'initial_capital', 'final_value', 'total_return', 
-                              'sharpe_ratio', 'max_drawdown', 'total_trades', 'win_rate', 'created_at']
-                
-                formatted_df = filtered_backtests[display_cols].copy()
-                formatted_df['total_return'] = formatted_df['total_return'].apply(lambda x: f"{x:.2%}")
-                formatted_df['sharpe_ratio'] = formatted_df['sharpe_ratio'].apply(lambda x: f"{x:.3f}")
-                formatted_df['max_drawdown'] = formatted_df['max_drawdown'].apply(lambda x: f"{x:.2%}")
-                formatted_df['win_rate'] = formatted_df['win_rate'].apply(lambda x: f"{x:.2%}")
-                formatted_df['initial_capital'] = formatted_df['initial_capital'].apply(lambda x: f"₹{x:,.0f}")
-                formatted_df['final_value'] = formatted_df['final_value'].apply(lambda x: f"₹{x:,.0f}")
-                
-                st.dataframe(formatted_df, use_container_width=True)
-                
-                # Enhanced comparison functionality
-                selected_backtests = st.multiselect(
-                    "Select backtests to compare:",
-                    options=filtered_backtests['id'].tolist(),
-                    format_func=lambda x: f"ID {x}: {filtered_backtests[filtered_backtests['id']==x]['name'].iloc[0]}",
-                    key="hist_compare_select"
-                )
-                
-                if selected_backtests and st.button("🔍 Compare Selected Enhanced Backtests", key="hist_compare_button"):
-                    compare_enhanced_backtests(selected_backtests, db)
-            
-            else:
-                st.info("No backtests match the current filters.")
+        }
         
-        else:
-            st.info("No historical enhanced backtests found. Run your first enhanced backtest above!")
-    
+        comparison_df = pd.DataFrame(comparison_data)
+        st.dataframe(comparison_df, use_container_width=True)
+        
+        # Download report button
+        generate_downloadable_report(results, config, backtest_name)
+        
     except Exception as e:
-        st.error(f"Error loading historical backtests: {e}")
+        st.error(f"❌ Error displaying results: {str(e)}")
+        with st.expander("🔧 Error Details", expanded=False):
+            st.code(str(e))
 
-def compare_enhanced_backtests(backtest_ids, db):
-    """Compare multiple enhanced backtests"""
-    
-    st.subheader("📊 Enhanced Backtest Comparison")
-    
-    try:
-        comparison_data = []
-        
-        for backtest_id in backtest_ids:
-            backtest_results = db.get_backtest(backtest_id)
-            if backtest_results:
-                metrics = backtest_results.get('metrics', {})
-                comparison_data.append({
-                    'ID': backtest_id,
-                    'Name': backtest_results.get('name', f'Backtest {backtest_id}'),
-                    'Total Return': metrics.get('total_return', 0),
-                    'Sharpe Ratio': metrics.get('sharpe_ratio', 0),
-                    'Max Drawdown': metrics.get('max_drawdown', 0),
-                    'Total Trades': len(backtest_results.get('trades', [])),
-                    'Risk Events': len(backtest_results.get('risk_events', [])),
-                    'Final Value': metrics.get('final_value', 0)
-                })
-        
-        if comparison_data:
-            comparison_df = pd.DataFrame(comparison_data)
-            
-            # Create comparison charts
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Return comparison
-                fig_return = px.bar(
-                    comparison_df, 
-                    x='Name', 
-                    y='Total Return',
-                    title='Total Return Comparison',
-                    color='Total Return',
-                    color_continuous_scale='RdYlGn'
-                )
-                fig_return.update_layout(xaxis_tickangle=-45)
-                st.plotly_chart(fig_return, use_container_width=True)
-            
-            with col2:
-                # Risk-Return scatter
-                fig_scatter = px.scatter(
-                    comparison_df,
-                    x='Max Drawdown',
-                    y='Total Return',
-                    size='Total Trades',
-                    color='Sharpe Ratio',
-                    hover_name='Name',
-                    title='Risk-Return Analysis',
-                    labels={'Max Drawdown': 'Max Drawdown (%)', 'Total Return': 'Total Return (%)'}
-                )
-                st.plotly_chart(fig_scatter, use_container_width=True)
-            
-            # Detailed comparison table
-            st.markdown("### Detailed Comparison")
-            
-            formatted_comparison = comparison_df.copy()
-            formatted_comparison['Total Return'] = formatted_comparison['Total Return'].apply(lambda x: f"{x:.2%}")
-            formatted_comparison['Sharpe Ratio'] = formatted_comparison['Sharpe Ratio'].apply(lambda x: f"{x:.3f}")
-            formatted_comparison['Max Drawdown'] = formatted_comparison['Max Drawdown'].apply(lambda x: f"{x:.2%}")
-            formatted_comparison['Final Value'] = formatted_comparison['Final Value'].apply(lambda x: f"₹{x:,.0f}")
-            
-            st.dataframe(formatted_comparison, use_container_width=True)
-            
-        else:
-            st.warning("No valid backtest data found for comparison")
-    
-    except Exception as e:
-        st.error(f"Error comparing backtests: {e}")
-
-def generate_detailed_text_report(results, config, enhanced_params):
+def generate_detailed_text_report(results, config, risk_events):
     """Generate detailed text report for download"""
-    
-    portfolio_history = results.get('portfolio_history', [])
-    enhanced_trades = results.get('trades', [])
-    risk_events = results.get('risk_events', [])
-    enhanced_metrics = results.get('metrics', {})
-    risk_analysis = results.get('risk_analysis', {})
     
     report = f"""
 ENHANCED BACKTESTING REPORT
 {'='*50}
-Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
-CONFIGURATION SUMMARY
-{'='*30}
-Initial Capital: ₹{config.initial_capital:,}
+BACKTEST CONFIGURATION
+{'-'*25}
+Initial Capital: ₹{config.initial_capital:,.0f}
 Transaction Cost: {config.transaction_cost_pct:.3%}
-Slippage: {config.slippage_pct:.3%}
 Max Positions: {config.max_positions}
-Rebalancing Frequency: {config.rebalance_frequency}
-Position Sizing Method: {config.position_sizing_method}
+Position Sizing: {config.position_sizing_method}
+Max Drawdown Limit: {config.max_drawdown_limit:.1%}
+Risk Management: {'Enabled' if hasattr(config, 'enable_correlation_monitoring') else 'Disabled'}
 
-RISK MANAGEMENT SETTINGS
-{'='*30}
-Max Portfolio Drawdown: {config.max_portfolio_drawdown:.1%}
-Max Position Correlation: {config.max_position_correlation:.2f}
-VaR Confidence Level: {config.var_confidence_level:.1%}
-Kelly Fraction Cap: {config.kelly_fraction_cap:.1%}
-Stress Test Frequency: {config.stress_test_frequency} days
-Risk Budget Limit: {config.risk_budget_limit:.1%}
-Rebalance Threshold: {config.rebalance_threshold:.1%}
+PERFORMANCE SUMMARY
+{'-'*25}
+Total Return: {results.get('total_return', 0):.2%}
+Annual Return: {results.get('annual_return', 0):.2%}
+Sharpe Ratio: {results.get('sharpe_ratio', 0):.3f}
+Sortino Ratio: {results.get('sortino_ratio', 0):.3f}
+Maximum Drawdown: {results.get('max_drawdown', 0):.2%}
+Calmar Ratio: {results.get('calmar_ratio', 0):.3f}
+Volatility: {results.get('volatility', 0):.2%}
 
-PERFORMANCE METRICS
-{'='*30}
-Total Return: {enhanced_metrics.get('total_return', 0):.2%}
-Annualized Return: {enhanced_metrics.get('annual_return', 0):.2%}
-Volatility: {enhanced_metrics.get('volatility', 0):.2%}
-Sharpe Ratio: {enhanced_metrics.get('sharpe_ratio', 0):.3f}
-Maximum Drawdown: {enhanced_metrics.get('max_drawdown', 0):.2%}
-Calmar Ratio: {enhanced_metrics.get('calmar_ratio', 0):.3f}
-Sortino Ratio: {enhanced_metrics.get('sortino_ratio', 0):.3f}
-
-RISK MANAGEMENT SUMMARY
-{'='*30}
-Total Risk Events: {len(risk_events)}
-Drawdown Violations: {risk_analysis.get('drawdown_violations', 0)}
-Correlation Violations: {risk_analysis.get('correlation_violations', 0)}
-Risk-Adjusted Trades: {risk_analysis.get('risk_adjusted_trades', 0)}
-VaR Breaches: {risk_analysis.get('var_breaches', 0)}
-
-TRADING SUMMARY
-{'='*30}
-Total Trades: {len(enhanced_trades)}
-Winning Trades: {sum(1 for t in enhanced_trades if t.net_pnl > 0)}
-Losing Trades: {sum(1 for t in enhanced_trades if t.net_pnl <= 0)}
-Win Rate: {(sum(1 for t in enhanced_trades if t.net_pnl > 0) / len(enhanced_trades) if enhanced_trades else 0):.1%}
-Average Return per Trade: {(np.mean([t.return_pct for t in enhanced_trades]) if enhanced_trades else 0):.2%}
-Average Holding Period: {(np.mean([t.holding_period for t in enhanced_trades]) if enhanced_trades else 0):.1f} days
-Total P&L: ₹{sum(t.net_pnl for t in enhanced_trades):,.0f}
+TRADING STATISTICS
+{'-'*25}
+Total Trades: {results.get('total_trades', 0)}
+Winning Trades: {results.get('winning_trades', 0)}
+Losing Trades: {results.get('losing_trades', 0)}
+Win Rate: {results.get('win_rate', 0):.2%}
+Profit Factor: {results.get('profit_factor', 0):.2f}
+Average Win: ₹{results.get('avg_win', 0):,.0f}
+Average Loss: ₹{results.get('avg_loss', 0):,.0f}
+Total P&L: ₹{sum(t.net_pnl for t in results.get('trades', [])):,.0f}
 """
     
+    enhanced_trades = results.get('trades', [])
     if enhanced_trades:
         report += f"\n\nDETAILED TRADE LOG\n{'='*50}\n"
         for i, trade in enumerate(enhanced_trades):

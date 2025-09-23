@@ -1,748 +1,861 @@
-import yfinance as yf
+# utils/data_loader.py - Complete Data Loading System
 import pandas as pd
 import numpy as np
-import requests
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
+import yfinance as yf
 import logging
 from datetime import datetime, timedelta
-import os
-import sqlite3
-from pathlib import Path
-import hashlib
-from tqdm import tqdm
+from typing import Dict, List, Tuple, Optional, Any
 import warnings
-import json
-import sys
-from config import secrets
-from typing import Dict, List, Tuple, Any, Optional
+import sqlite3
+import os
+import pickle
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import requests
+from functools import lru_cache
 
 warnings.filterwarnings('ignore')
 logging.basicConfig(level=logging.INFO)
 
-# ==================== ENHANCED CONFIGURATION ====================
+# ==================== CONFIGURATION ====================
+
 DATA_CONFIG = {
-    'default_period': '10y',
-    'max_period': '20y',
-    'default_interval': '1d',
-    'max_workers': 6,
-    'retry_attempts': 5,
-    'retry_delay': 2,
-    'cache_enabled': True,
-    'cache_duration_hours': 12,
-    'batch_size': 8,
-    'request_delay': 0.5,
-    'timeout': 45,
-    'validate_data': True,
+    'max_period': '5y',
     'use_database': True,
-    'fallback_tickers': True,
-    'data_quality_threshold': 0.7,
-    'realtime_refresh_minutes': 5
+    'database_path': 'data/stock_data.db',
+    'cache_duration_hours': 24,
+    'validate_data': True,
+    'min_data_points': 100,
+    'parallel_downloads': True,
+    'max_workers': 4,
+    'retry_attempts': 3,
+    'timeout_seconds': 30,
+    'backup_sources': ['yfinance'],  # Can add more sources
+    'data_quality_checks': True,
+    'auto_cleanup': True
 }
 
-# ==================== DATABASE STORAGE ====================
-class StockDataDatabase:
-    """SQLite database for persistent stock data storage"""
+# Indian stock market tickers with sectors
+NIFTY_50_TICKERS = {
+    # Banking
+    'HDFCBANK.NS': {'name': 'HDFC Bank', 'sector': 'Banking'},
+    'ICICIBANK.NS': {'name': 'ICICI Bank', 'sector': 'Banking'},
+    'KOTAKBANK.NS': {'name': 'Kotak Mahindra Bank', 'sector': 'Banking'},
+    'SBIN.NS': {'name': 'State Bank of India', 'sector': 'Banking'},
+    'AXISBANK.NS': {'name': 'Axis Bank', 'sector': 'Banking'},
+    'INDUSINDBK.NS': {'name': 'IndusInd Bank', 'sector': 'Banking'},
     
-    def __init__(self, db_path: str = "data/stock_data.db"):
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        self.db_path = db_path
-        self.init_database()
+    # Technology
+    'TCS.NS': {'name': 'Tata Consultancy Services', 'sector': 'Technology'},
+    'INFY.NS': {'name': 'Infosys', 'sector': 'Technology'},
+    'WIPRO.NS': {'name': 'Wipro', 'sector': 'Technology'},
+    'HCLTECH.NS': {'name': 'HCL Technologies', 'sector': 'Technology'},
+    'TECHM.NS': {'name': 'Tech Mahindra', 'sector': 'Technology'},
     
-    def init_database(self):
-        """Initialize database tables"""
+    # Industrial & Infrastructure
+    'RELIANCE.NS': {'name': 'Reliance Industries', 'sector': 'Industrial'},
+    'LT.NS': {'name': 'Larsen & Toubro', 'sector': 'Industrial'},
+    'ULTRACEMCO.NS': {'name': 'UltraTech Cement', 'sector': 'Industrial'},
+    'POWERGRID.NS': {'name': 'Power Grid Corporation', 'sector': 'Industrial'},
+    'NTPC.NS': {'name': 'NTPC', 'sector': 'Industrial'},
+    'COALINDIA.NS': {'name': 'Coal India', 'sector': 'Industrial'},
+    'ONGC.NS': {'name': 'Oil & Natural Gas Corporation', 'sector': 'Industrial'},
+    'IOC.NS': {'name': 'Indian Oil Corporation', 'sector': 'Industrial'},
+    'BPCL.NS': {'name': 'Bharat Petroleum', 'sector': 'Industrial'},
+    'TATASTEEL.NS': {'name': 'Tata Steel', 'sector': 'Industrial'},
+    'JSWSTEEL.NS': {'name': 'JSW Steel', 'sector': 'Industrial'},
+    'HINDALCO.NS': {'name': 'Hindalco Industries', 'sector': 'Industrial'},
+    'VEDL.NS': {'name': 'Vedanta', 'sector': 'Industrial'},
+    'ADANIPORTS.NS': {'name': 'Adani Ports', 'sector': 'Industrial'},
+    'GRASIM.NS': {'name': 'Grasim Industries', 'sector': 'Industrial'},
+    
+    # FMCG & Consumer
+    'HINDUNILVR.NS': {'name': 'Hindustan Unilever', 'sector': 'FMCG'},
+    'ITC.NS': {'name': 'ITC', 'sector': 'FMCG'},
+    'NESTLEIND.NS': {'name': 'Nestle India', 'sector': 'FMCG'},
+    'BRITANNIA.NS': {'name': 'Britannia Industries', 'sector': 'FMCG'},
+    'TATACONSUM.NS': {'name': 'Tata Consumer Products', 'sector': 'FMCG'},
+    'TITAN.NS': {'name': 'Titan Company', 'sector': 'FMCG'},
+    'ASIANPAINT.NS': {'name': 'Asian Paints', 'sector': 'FMCG'},
+    
+    # Auto & Financial Services
+    'MARUTI.NS': {'name': 'Maruti Suzuki', 'sector': 'Auto'},
+    'TATAMOTORS.NS': {'name': 'Tata Motors', 'sector': 'Auto'},
+    'BAJAJ-AUTO.NS': {'name': 'Bajaj Auto', 'sector': 'Auto'},
+    'EICHERMOT.NS': {'name': 'Eicher Motors', 'sector': 'Auto'},
+    'HEROMOTOCO.NS': {'name': 'Hero MotoCorp', 'sector': 'Auto'},
+    'M&M.NS': {'name': 'Mahindra & Mahindra', 'sector': 'Auto'},
+    
+    'BAJFINANCE.NS': {'name': 'Bajaj Finance', 'sector': 'Financial Services'},
+    'BAJAJFINSV.NS': {'name': 'Bajaj Finserv', 'sector': 'Financial Services'},
+    'HDFC.NS': {'name': 'HDFC', 'sector': 'Financial Services'},
+    
+    # Pharma & Healthcare
+    'SUNPHARMA.NS': {'name': 'Sun Pharmaceutical', 'sector': 'Pharma'},
+    'DRREDDY.NS': {'name': 'Dr. Reddys Laboratories', 'sector': 'Pharma'},
+    'CIPLA.NS': {'name': 'Cipla', 'sector': 'Pharma'},
+    'DIVISLAB.NS': {'name': 'Divis Laboratories', 'sector': 'Pharma'},
+    'APOLLOHOSP.NS': {'name': 'Apollo Hospitals', 'sector': 'Healthcare'},
+    
+    # Telecom & Others
+    'BHARTIARTL.NS': {'name': 'Bharti Airtel', 'sector': 'Telecom'},
+    'UPL.NS': {'name': 'UPL', 'sector': 'Chemicals'},
+    'SHREECEM.NS': {'name': 'Shree Cement', 'sector': 'Cement'}
+}
+
+# ==================== DATABASE MANAGEMENT ====================
+
+class StockDataDB:
+    """Database manager for stock data"""
+    
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or DATA_CONFIG['database_path']
+        self._ensure_database_exists()
+    
+    def _ensure_database_exists(self):
+        """Create database and tables if they don't exist"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS stock_data (
-                        ticker TEXT,
-                        date TEXT,
-                        open REAL,
-                        high REAL,
-                        low REAL,
-                        close REAL,
-                        volume INTEGER,
-                        adj_close REAL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (ticker, date)
-                    )
-                """)
-                
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS ticker_metadata (
-                        ticker TEXT PRIMARY KEY,
-                        last_updated TIMESTAMP,
-                        data_quality REAL,
-                        total_records INTEGER,
-                        earliest_date TEXT,
-                        latest_date TEXT
-                    )
-                """)
-                
-                conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_ticker_date ON stock_data (ticker, date);
-                """)
+            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+            
+            conn = sqlite3.connect(self.db_path)
+            
+            # Create main stock data table
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS stock_data (
+                    ticker TEXT,
+                    date TEXT,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume INTEGER,
+                    adj_close REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (ticker, date)
+                )
+            ''')
+            
+            # Create metadata table
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS data_metadata (
+                    ticker TEXT PRIMARY KEY,
+                    last_updated TIMESTAMP,
+                    data_points INTEGER,
+                    start_date TEXT,
+                    end_date TEXT,
+                    data_quality_score REAL
+                )
+            ''')
+            
+            # Create indices for better performance
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_ticker_date ON stock_data(ticker, date)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_date ON stock_data(date)')
+            
+            conn.commit()
+            conn.close()
+            
+            logging.info(f"Database initialized at {self.db_path}")
+            
         except Exception as e:
             logging.error(f"Database initialization failed: {e}")
     
-    def save_stock_data(self, ticker: str, df: pd.DataFrame):
+    def save_stock_data(self, ticker: str, df: pd.DataFrame) -> bool:
         """Save stock data to database"""
-        if df.empty:
-            return
-            
         try:
-            df_copy = df.copy()
-            df_copy.reset_index(inplace=True)
-            df_copy['ticker'] = ticker
-            df_copy['Date'] = df_copy['Date'].dt.strftime('%Y-%m-%d')
+            if df.empty:
+                return False
             
-            # Rename columns to match database schema
-            column_mapping = {
-                'Date': 'date',
-                'Open': 'open',
-                'High': 'high', 
-                'Low': 'low',
-                'Close': 'close',
-                'Volume': 'volume',
-                'Adj Close': 'adj_close'
-            }
-            df_copy = df_copy.rename(columns=column_mapping)
+            conn = sqlite3.connect(self.db_path)
             
-            with sqlite3.connect(self.db_path) as conn:
-                # Delete existing data for this ticker
-                conn.execute("DELETE FROM stock_data WHERE ticker = ?", (ticker,))
-                
-                # Insert new data
-                df_copy[['ticker', 'date', 'open', 'high', 'low', 'close', 'volume', 'adj_close']].to_sql(
-                    'stock_data', conn, if_exists='append', index=False
-                )
-                
-                # Update metadata
-                conn.execute("""
-                    INSERT OR REPLACE INTO ticker_metadata 
-                    (ticker, last_updated, data_quality, total_records, earliest_date, latest_date)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
+            # Prepare data for insertion
+            data_records = []
+            for date, row in df.iterrows():
+                data_records.append((
                     ticker,
-                    datetime.now().isoformat(),
-                    1.0,
-                    len(df_copy),
-                    df_copy['date'].min(),
-                    df_copy['date'].max()
+                    date.strftime('%Y-%m-%d'),
+                    float(row.get('Open', 0)),
+                    float(row.get('High', 0)),
+                    float(row.get('Low', 0)),
+                    float(row.get('Close', 0)),
+                    int(row.get('Volume', 0)),
+                    float(row.get('Adj Close', row.get('Close', 0)))
                 ))
+            
+            # Insert data (replace existing)
+            conn.execute('DELETE FROM stock_data WHERE ticker = ?', (ticker,))
+            
+            conn.executemany('''
+                INSERT INTO stock_data 
+                (ticker, date, open, high, low, close, volume, adj_close)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', data_records)
+            
+            # Update metadata
+            conn.execute('''
+                INSERT OR REPLACE INTO data_metadata 
+                (ticker, last_updated, data_points, start_date, end_date, data_quality_score)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                ticker,
+                datetime.now(),
+                len(df),
+                df.index[0].strftime('%Y-%m-%d'),
+                df.index[-1].strftime('%Y-%m-%d'),
+                self._calculate_data_quality_score(df)
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            logging.info(f"Saved {len(df)} records for {ticker}")
+            return True
+            
         except Exception as e:
             logging.error(f"Failed to save data for {ticker}: {e}")
+            return False
     
-    def load_stock_data(self, ticker: str, start_date: str = None) -> pd.DataFrame:
+    def load_stock_data(self, ticker: str, days_old: int = None) -> Optional[pd.DataFrame]:
         """Load stock data from database"""
         try:
-            query = "SELECT * FROM stock_data WHERE ticker = ?"
-            params = [ticker]
+            conn = sqlite3.connect(self.db_path)
             
-            if start_date:
-                query += " AND date >= ?"
-                params.append(start_date)
-                
-            query += " ORDER BY date"
+            # Check if data exists and is recent enough
+            metadata_query = '''
+                SELECT last_updated, data_points FROM data_metadata 
+                WHERE ticker = ?
+            '''
+            metadata = conn.execute(metadata_query, (ticker,)).fetchone()
             
-            with sqlite3.connect(self.db_path) as conn:
-                df = pd.read_sql(query, conn, params=params)
-                
+            if not metadata:
+                conn.close()
+                return None
+            
+            last_updated, data_points = metadata
+            last_updated = datetime.fromisoformat(last_updated)
+            
+            # Check if data is recent enough
+            if days_old is not None:
+                age_hours = (datetime.now() - last_updated).total_seconds() / 3600
+                if age_hours > days_old * 24:
+                    conn.close()
+                    return None
+            
+            # Load data
+            query = '''
+                SELECT date, open, high, low, close, volume, adj_close
+                FROM stock_data 
+                WHERE ticker = ?
+                ORDER BY date
+            '''
+            
+            df = pd.read_sql_query(query, conn, params=(ticker,))
+            conn.close()
+            
             if df.empty:
-                return pd.DataFrame()
-                
-            # Convert back to yfinance format
-            df['Date'] = pd.to_datetime(df['date'])
-            df = df.set_index('Date')
+                return None
             
-            column_mapping = {
-                'open': 'Open',
-                'high': 'High',
-                'low': 'Low', 
-                'close': 'Close',
-                'volume': 'Volume',
-                'adj_close': 'Adj Close'
-            }
-            df = df.rename(columns=column_mapping)
-            df = df[['Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close']]
+            # Process dataframe
+            df['date'] = pd.to_datetime(df['date'])
+            df.set_index('date', inplace=True)
             
+            # Rename columns to match yfinance format
+            df.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Adj Close']
+            
+            logging.info(f"Loaded {len(df)} cached records for {ticker}")
             return df
+            
         except Exception as e:
-            logging.error(f"Failed to load data for {ticker}: {e}")
-            return pd.DataFrame()
+            logging.error(f"Failed to load cached data for {ticker}: {e}")
+            return None
     
-    def get_ticker_metadata(self, ticker: str) -> Optional[Dict]:
-        """Get metadata for a ticker"""
+    def _calculate_data_quality_score(self, df: pd.DataFrame) -> float:
+        """Calculate data quality score (0-1)"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute(
-                    "SELECT * FROM ticker_metadata WHERE ticker = ?", 
-                    (ticker,)
+            if df.empty:
+                return 0.0
+            
+            score = 1.0
+            
+            # Check for missing values
+            missing_ratio = df.isnull().sum().sum() / (len(df) * len(df.columns))
+            score -= missing_ratio * 0.3
+            
+            # Check for zero values in price columns
+            price_cols = ['Open', 'High', 'Low', 'Close']
+            for col in price_cols:
+                if col in df.columns:
+                    zero_ratio = (df[col] == 0).sum() / len(df)
+                    score -= zero_ratio * 0.2
+            
+            # Check for reasonable price movements
+            if 'Close' in df.columns:
+                returns = df['Close'].pct_change().dropna()
+                if len(returns) > 0:
+                    extreme_moves = (abs(returns) > 0.2).sum() / len(returns)
+                    score -= extreme_moves * 0.1
+            
+            return max(0.0, min(1.0, score))
+            
+        except Exception:
+            return 0.5
+    
+    def cleanup_old_data(self, days_to_keep: int = 30):
+        """Clean up old data from database"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            
+            cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+            
+            # Remove old data
+            conn.execute('''
+                DELETE FROM stock_data 
+                WHERE date < ?
+            ''', (cutoff_date.strftime('%Y-%m-%d'),))
+            
+            # Update metadata
+            conn.execute('''
+                DELETE FROM data_metadata 
+                WHERE last_updated < ?
+            ''', (cutoff_date,))
+            
+            conn.commit()
+            conn.close()
+            
+            logging.info(f"Cleaned up data older than {days_to_keep} days")
+            
+        except Exception as e:
+            logging.error(f"Database cleanup failed: {e}")
+
+# ==================== DATA DOWNLOAD AND PROCESSING ====================
+
+class EnhancedDataLoader:
+    """Enhanced data loader with multiple sources and robust error handling"""
+    
+    def __init__(self, config: Dict = None):
+        self.config = config or DATA_CONFIG
+        self.db = StockDataDB(self.config.get('database_path'))
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+    
+    def download_single_stock(self, ticker: str, period: str = '5y', 
+                             force_refresh: bool = False) -> Optional[pd.DataFrame]:
+        """Download data for a single stock with robust error handling"""
+        
+        try:
+            # Check cache first (if not forcing refresh)
+            if not force_refresh and self.config.get('use_database', True):
+                cached_data = self.db.load_stock_data(
+                    ticker, 
+                    days_old=self.config.get('cache_duration_hours', 24) // 24
                 )
-                row = cursor.fetchone()
                 
-            if row:
-                columns = [desc[0] for desc in cursor.description]
-                return dict(zip(columns, row))
-            return None
-        except Exception as e:
-            logging.error(f"Failed to get metadata for {ticker}: {e}")
-            return None
-
-# ==================== REAL-TIME DATA INTEGRATION ====================
-class RealTimeDataManager:
-    """Manager for real-time data updates"""
-    def __init__(self, db_path: str = "data/realtime_data.db"):
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        self.db_path = db_path
-        self.init_database()
-    
-    def init_database(self):
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS realtime_data (
-                        ticker TEXT,
-                        timestamp DATETIME,
-                        open REAL,
-                        high REAL,
-                        low REAL,
-                        close REAL,
-                        volume INTEGER,
-                        PRIMARY KEY (ticker, timestamp)
+                if cached_data is not None and len(cached_data) > self.config.get('min_data_points', 100):
+                    logging.info(f"Using cached data for {ticker}")
+                    return cached_data
+            
+            # Download fresh data
+            logging.info(f"Downloading fresh data for {ticker}")
+            
+            success = False
+            df = None
+            
+            # Try multiple download attempts
+            for attempt in range(self.config.get('retry_attempts', 3)):
+                try:
+                    # Primary method: yfinance
+                    stock = yf.Ticker(ticker)
+                    df = stock.history(
+                        period=period,
+                        timeout=self.config.get('timeout_seconds', 30)
                     )
-                """)
-        except Exception as e:
-            logging.error(f"Realtime database initialization failed: {e}")
-    
-    def update_realtime_data(self, tickers: list):
-        """Fetch and store real-time data"""
-        for ticker in tqdm(tickers, desc="Updating real-time data"):
-            try:
-                stock = yf.Ticker(ticker)
-                data = stock.history(period='1d', interval='1m')
-                
-                if not data.empty:
-                    data = data.reset_index()
-                    data['ticker'] = ticker
-                    data.rename(columns={'Datetime': 'timestamp'}, inplace=True)
                     
-                    with sqlite3.connect(self.db_path) as conn:
-                        data[['ticker', 'timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']].to_sql(
-                            'realtime_data', conn, if_exists='append', index=False
-                        )
-            except Exception as e:
-                logging.error(f"Real-time update failed for {ticker}: {e}")
-    
-    def get_latest_data(self, ticker: str, lookback_minutes=60):
-        """Get latest real-time data"""
-        try:
-            query = f"""
-                SELECT * FROM realtime_data 
-                WHERE ticker = ? 
-                AND timestamp >= datetime('now', '-{lookback_minutes} minutes')
-                ORDER BY timestamp DESC
-            """
-            with sqlite3.connect(self.db_path) as conn:
-                df = pd.read_sql(query, conn, params=(ticker,))
+                    if not df.empty and len(df) > 10:
+                        success = True
+                        break
+                    
+                except Exception as e:
+                    logging.warning(f"Download attempt {attempt + 1} failed for {ticker}: {e}")
+                    time.sleep(1)  # Brief pause between attempts
             
-            if not df.empty:
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                df = df.set_index('timestamp')
-            return df
-        except Exception as e:
-            logging.error(f"Failed to get latest data for {ticker}: {e}")
-            return pd.DataFrame()
-
-# ==================== ALTERNATIVE DATA SOURCES ====================
-class NewsSentimentLoader:
-    """Fetch and process news sentiment data"""
-    def __init__(self, api_key: str = None):
-        self.api_key = api_key or secrets.NEWS_API_KEY
-        self.base_url = "https://newsapi.org/v2/everything"
-    
-    def fetch_news(self, query: str, days=7):
-        """Fetch news articles for a query"""
-        if not self.api_key:
-            return []
+            if not success or df is None or df.empty:
+                logging.error(f"Failed to download data for {ticker}")
+                return None
             
-        params = {
-            'q': query,
-            'apiKey': self.api_key,
-            'language': 'en',
-            'sortBy': 'publishedAt',
-            'from': (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d'),
-            'pageSize': 50
-        }
-        
-        try:
-            response = requests.get(self.base_url, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            return data.get('articles', [])
-        except Exception as e:
-            logging.error(f"News API error: {e}")
-            return []
-    
-    def analyze_sentiment(self, text: str):
-        """Simple sentiment analysis"""
-        positive_words = ['bullish', 'growth', 'strong', 'buy', 'outperform', 'positive']
-        negative_words = ['bearish', 'decline', 'weak', 'sell', 'underperform', 'negative']
-        
-        if any(word in text.lower() for word in positive_words):
-            return 1
-        elif any(word in text.lower() for word in negative_words):
-            return -1
-        return 0
-    
-    def get_sentiment_scores(self, ticker: str):
-        """Get sentiment scores for a ticker"""
-        articles = self.fetch_news(ticker)
-        if not articles:
-            return 0
-        
-        scores = []
-        for article in articles:
-            content = f"{article['title']} {article.get('description', '')}"
-            scores.append(self.analyze_sentiment(content))
-        
-        return np.mean(scores) if scores else 0
-
-# ==================== ENHANCED TICKER MANAGEMENT ====================
-def get_updated_nifty_tickers() -> List[str]:
-    """Get most current NIFTY tickers with automatic updates"""
-    current_tickers = [
-        "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "HINDUNILVR.NS",
-        "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS", "BHARTIARTL.NS", "LT.NS",
-        "HDFC.NS", "ITC.NS", "ASIANPAINT.NS", "MARUTI.NS", "AXISBANK.NS",
-        "BAJFINANCE.NS", "WIPRO.NS", "ONGC.NS", "SUNPHARMA.NS", "NESTLEIND.NS",
-        "HCLTECH.NS", "ULTRACEMCO.NS", "POWERGRID.NS", "NTPC.NS", "TECHM.NS",
-        "TATAMOTORS.NS", "BAJAJFINSV.NS", "COALINDIA.NS", "INDUSINDBK.NS", "CIPLA.NS",
-        "DRREDDY.NS", "EICHERMOT.NS", "GRASIM.NS", "HEROMOTOCO.NS", "HINDALCO.NS",
-        "IOC.NS", "JSWSTEEL.NS", "M&M.NS", "BRITANNIA.NS", "DIVISLAB.NS",
-        "ADANIPORTS.NS", "APOLLOHOSP.NS", "BAJAJ-AUTO.NS", "BPCL.NS", "SHREECEM.NS",
-        "TATASTEEL.NS", "TITAN.NS", "UPL.NS", "VEDL.NS", "TATACONSUM.NS"
-    ]
-    
-    delisted_tickers = {"ADANITRANS.NS", "LTI.NS"}
-    active_tickers = [ticker for ticker in current_tickers if ticker not in delisted_tickers]
-    
-    return active_tickers
-
-def validate_and_filter_tickers(tickers: List[str]) -> List[str]:
-    """Validate tickers and filter out invalid ones"""
-    valid_tickers = []
-    
-    for ticker in tickers:
-        if not ticker or not isinstance(ticker, str):
-            continue
+            # Validate and clean data
+            df = self._validate_and_clean_data(df, ticker)
             
-        ticker = ticker.upper().strip()
-        
-        if not ticker.endswith('.NS') and not ticker.endswith('.BO'):
-            ticker += '.NS'
+            if df is None or len(df) < self.config.get('min_data_points', 100):
+                logging.warning(f"Insufficient data for {ticker}: {len(df) if df is not None else 0} points")
+                return None
             
-        if any(char in ticker for char in ['/', '\\', '|', '<', '>', '"']):
-            continue
-            
-        valid_tickers.append(ticker)
-    
-    return list(set(valid_tickers))
-
-# ==================== ENHANCED DATA FETCHING ====================
-def fetch_extended_historical_data(ticker: str, 
-                                 max_period: str = "20y",
-                                 fallback_periods: List[str] = None) -> pd.DataFrame:
-    """Fetch maximum available historical data with fallback periods"""
-    if fallback_periods is None:
-        fallback_periods = ["20y", "15y", "10y", "5y", "2y", "1y"]
-    
-    for period in fallback_periods:
-        try:
-            stock = yf.Ticker(ticker)
-            df = stock.history(period=period, timeout=60)
-            
-            if not df.empty and len(df) > 100:
-                logging.info(f"Successfully fetched {len(df)} records for {ticker} ({period})")
-                return df
-            elif not df.empty:
-                logging.warning(f"Limited data for {ticker}: {len(df)} records ({period})")  
-                
-        except Exception as e:
-            logging.warning(f"Failed to fetch {ticker} with period {period}: {e}")
-            continue
-    
-    # Last resort: try with specific date range
-    try:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=365*20)
-        
-        stock = yf.Ticker(ticker)
-        df = stock.history(start=start_date.strftime('%Y-%m-%d'), 
-                          end=end_date.strftime('%Y-%m-%d'))
-        
-        if not df.empty:
-            logging.info(f"Fetched {len(df)} records for {ticker} using date range")
-            return df
-            
-    except Exception as e:
-        logging.error(f"All methods failed for {ticker}: {e}")
-    
-    return pd.DataFrame()
-
-def fetch_single_ticker_enhanced(args: Tuple) -> Tuple[str, pd.DataFrame]:
-    """Enhanced single ticker fetching with database integration"""
-    ticker, config, database = args
-    
-    try:
-        # Check database first
-        if database and config.get('use_database'):
-            metadata = database.get_ticker_metadata(ticker)
-            if metadata:
-                last_updated = datetime.fromisoformat(metadata['last_updated'])
-                hours_since_update = (datetime.now() - last_updated).total_seconds() / 3600
-                
-                if hours_since_update < config.get('cache_duration_hours', 12):
-                    cached_data = database.load_stock_data(ticker)
-                    if not cached_data.empty:
-                        logging.info(f"Loaded {ticker} from database cache")
-                        return ticker, cached_data
-        
-        # Add progressive delay to avoid rate limiting
-        time.sleep(config.get('request_delay', 0.5))
-        
-        # Fetch with extended historical data
-        df = fetch_extended_historical_data(ticker, config.get('max_period', '20y'))
-        
-        if not df.empty:
-            # Validate data quality
-            if config.get('validate_data'):
-                df = validate_stock_data_enhanced(df, ticker)
-                
             # Save to database
-            if database and config.get('use_database') and not df.empty:
-                database.save_stock_data(ticker, df)
-                logging.info(f"Saved {ticker} to database")
+            if self.config.get('use_database', True):
+                self.db.save_stock_data(ticker, df)
             
-            return ticker, df
-        
-        logging.warning(f"No data retrieved for {ticker}")
-        return ticker, pd.DataFrame()
-        
-    except Exception as e:
-        logging.error(f"Enhanced fetch failed for {ticker}: {e}")
-        return ticker, pd.DataFrame()
-
-def fetch_historical_data_enhanced(tickers: List[str], 
-                                 config: Dict = None) -> Dict[str, pd.DataFrame]:
-    """Enhanced historical data fetching with database integration"""
-    config = config or DATA_CONFIG
+            logging.info(f"Successfully downloaded {len(df)} records for {ticker}")
+            return df
+            
+        except Exception as e:
+            logging.error(f"Download failed for {ticker}: {e}")
+            return None
     
-    # Initialize database
-    database = StockDataDatabase() if config.get('use_database') else None
-    
-    # Validate and filter tickers
-    tickers = validate_and_filter_tickers(tickers)
-    
-    print(f"Fetching enhanced data for {len(tickers)} selected tickers...")
-    print(f"Selected stocks: {tickers}")
-    print(f"Maximum period: {config.get('max_period', '20y')}")
-    print(f"Using database cache: {config.get('use_database', False)}")
-    
-    # Prepare tasks
-    tasks = [(ticker, config, database) for ticker in tickers]
-    
-    results = {}
-    successful_fetches = 0
-    
-    # Reduced batch size and workers for stability
-    batch_size = config.get('batch_size', 8)
-    max_workers = min(config.get('max_workers', 6), len(tickers))
-    
-    for i in tqdm(range(0, len(tasks), batch_size), desc="Fetching enhanced batches"):
-        batch_tasks = tasks[i:i + batch_size]
+    def _validate_and_clean_data(self, df: pd.DataFrame, ticker: str) -> Optional[pd.DataFrame]:
+        """Validate and clean downloaded data"""
         
         try:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            if df.empty:
+                return None
+            
+            # Ensure required columns exist
+            required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            
+            if missing_columns:
+                logging.warning(f"Missing columns for {ticker}: {missing_columns}")
+                return None
+            
+            # Remove rows with all NaN values
+            df = df.dropna(how='all')
+            
+            # Remove rows where all price columns are zero or negative
+            price_columns = ['Open', 'High', 'Low', 'Close']
+            valid_price_mask = (df[price_columns] > 0).any(axis=1)
+            df = df[valid_price_mask]
+            
+            # Forward fill missing values
+            df = df.fillna(method='ffill')
+            
+            # Remove remaining NaN values
+            df = df.dropna()
+            
+            # Validate High >= Low and High >= Close and High >= Open
+            df = df[(df['High'] >= df['Low']) & 
+                   (df['High'] >= df['Close']) & 
+                   (df['High'] >= df['Open']) &
+                   (df['Low'] <= df['Close']) &
+                   (df['Low'] <= df['Open'])]
+            
+            # Remove extreme outliers (daily changes > 50%)
+            if len(df) > 1:
+                returns = df['Close'].pct_change().abs()
+                valid_returns = returns < 0.5  # 50% daily change threshold
+                df = df[valid_returns.fillna(True)]
+            
+            # Ensure minimum data points
+            if len(df) < 50:
+                logging.warning(f"Insufficient valid data for {ticker}: {len(df)} points")
+                return None
+            
+            # Add Adj Close if missing
+            if 'Adj Close' not in df.columns:
+                df['Adj Close'] = df['Close']
+            
+            logging.info(f"Data validation passed for {ticker}: {len(df)} valid records")
+            return df
+            
+        except Exception as e:
+            logging.error(f"Data validation failed for {ticker}: {e}")
+            return None
+    
+    def download_multiple_stocks(self, tickers: List[str], period: str = '5y',
+                                force_refresh: bool = False) -> Dict[str, pd.DataFrame]:
+        """Download data for multiple stocks with parallel processing"""
+        
+        if not tickers:
+            return {}
+        
+        logging.info(f"Downloading data for {len(tickers)} stocks")
+        
+        results = {}
+        
+        if self.config.get('parallel_downloads', True) and len(tickers) > 1:
+            # Parallel processing
+            with ThreadPoolExecutor(max_workers=self.config.get('max_workers', 4)) as executor:
+                # Submit all download tasks
                 future_to_ticker = {
-                    executor.submit(fetch_single_ticker_enhanced, task): task[0] 
-                    for task in batch_tasks
+                    executor.submit(self.download_single_stock, ticker, period, force_refresh): ticker
+                    for ticker in tickers
                 }
                 
+                # Collect results as they complete
                 for future in as_completed(future_to_ticker):
                     ticker = future_to_ticker[future]
                     try:
-                        ticker_result, df = future.result()
-                        if not df.empty:
-                            results[ticker_result] = df
-                            successful_fetches += 1
-                            
-                            # Log data range
-                            date_range = f"{df.index[0].strftime('%Y-%m-%d')} to {df.index[-1].strftime('%Y-%m-%d')}"
-                            logging.info(f"{ticker}: {len(df)} records ({date_range})")
-                            
+                        df = future.result(timeout=60)  # 60 second timeout
+                        if df is not None:
+                            results[ticker] = df
                     except Exception as e:
-                        logging.warning(f"Failed to process {ticker}: {e}")
-        except Exception as e:
-            logging.error(f"Batch processing failed: {e}")
-            # Fallback to sequential processing for this batch
-            for task in batch_tasks:
-                try:
-                    ticker_result, df = fetch_single_ticker_enhanced(task)
-                    if not df.empty:
-                        results[ticker_result] = df
-                        successful_fetches += 1
-                except Exception as e:
-                    logging.warning(f"Sequential fallback failed for {task[0]}: {e}")
+                        logging.error(f"Parallel download failed for {ticker}: {e}")
+        else:
+            # Sequential processing
+            for ticker in tickers:
+                df = self.download_single_stock(ticker, period, force_refresh)
+                if df is not None:
+                    results[ticker] = df
         
-        # Longer pause between batches
-        if i + batch_size < len(tasks):
-            time.sleep(1.0)
-    
-    print(f"Successfully fetched enhanced data for {successful_fetches}/{len(tickers)} tickers")
-    
-    # Generate data quality report
-    generate_data_quality_report(results)
-    
-    return results
+        logging.info(f"Successfully downloaded data for {len(results)}/{len(tickers)} stocks")
+        return results
 
-# ==================== ENHANCED DATA VALIDATION ====================
-def validate_stock_data_enhanced(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
-    """Enhanced data validation with comprehensive checks"""
-    if df.empty:
-        return df
+# ==================== MAIN DATA LOADER FUNCTIONS ====================
+
+@lru_cache(maxsize=100)
+def get_available_tickers() -> Dict[str, Dict[str, str]]:
+    """Get available tickers with metadata"""
+    return NIFTY_50_TICKERS.copy()
+
+def get_tickers_by_sector(sector: str) -> List[str]:
+    """Get tickers filtered by sector"""
+    tickers = get_available_tickers()
+    return [ticker for ticker, info in tickers.items() 
+            if info.get('sector', '').lower() == sector.lower()]
+
+def get_comprehensive_stock_data(selected_tickers: List[str] = None, 
+                               period: str = '5y',
+                               force_refresh: bool = False,
+                               validate_data: bool = True,
+                               parallel: bool = True) -> Dict[str, pd.DataFrame]:
+    """
+    Comprehensive stock data loader - Main function used by app.py
     
-    original_length = len(df)
+    Args:
+        selected_tickers: List of tickers to download. If None, downloads all available
+        period: Data period (1y, 2y, 5y, 10y, max)
+        force_refresh: Force download even if cached data exists
+        validate_data: Perform data quality validation
+        parallel: Use parallel processing for downloads
+        
+    Returns:
+        Dictionary mapping ticker symbols to DataFrames
+    """
     
     try:
-        # Remove duplicate dates
-        df = df[~df.index.duplicated(keep='first')]
+        # Use selected tickers or default to all available
+        if selected_tickers is None:
+            available_tickers = get_available_tickers()
+            selected_tickers = list(available_tickers.keys())
         
-        # Ensure required columns exist
-        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-        missing_columns = [col for col in required_columns if col not in df.columns]
+        if not selected_tickers:
+            logging.warning("No tickers provided for data download")
+            return {}
         
-        if missing_columns:
-            logging.warning(f"Missing columns for {ticker}: {missing_columns}")
-            return pd.DataFrame()
+        # Filter to valid tickers
+        available_tickers = get_available_tickers()
+        valid_tickers = [ticker for ticker in selected_tickers 
+                        if ticker in available_tickers]
         
-        # Enhanced data quality checks
-        # 1. Basic OHLC validation
-        invalid_hl = df['High'] < df['Low']
-        if invalid_hl.any():
-            df = df[~invalid_hl]
-            logging.warning(f"Removed {invalid_hl.sum()} rows with High < Low for {ticker}")
+        if len(valid_tickers) != len(selected_tickers):
+            invalid_tickers = set(selected_tickers) - set(valid_tickers)
+            logging.warning(f"Invalid tickers removed: {invalid_tickers}")
         
-        # 2. OHLC range validation
-        invalid_ohlc = (
-            (df['Open'] > df['High']) | (df['Open'] < df['Low']) |
-            (df['Close'] > df['High']) | (df['Close'] < df['Low'])
+        if not valid_tickers:
+            logging.error("No valid tickers found")
+            return {}
+        
+        logging.info(f"Loading data for {len(valid_tickers)} selected stocks")
+        
+        # Configure data loader
+        config = DATA_CONFIG.copy()
+        config['parallel_downloads'] = parallel
+        config['validate_data'] = validate_data
+        
+        # Initialize loader and download data
+        loader = EnhancedDataLoader(config)
+        
+        # Download data
+        data_dict = loader.download_multiple_stocks(
+            tickers=valid_tickers,
+            period=period,
+            force_refresh=force_refresh
         )
-        if invalid_ohlc.any():
-            df = df[~invalid_ohlc]
-            logging.warning(f"Removed {invalid_ohlc.sum()} rows with invalid OHLC for {ticker}")
         
-        # 3. Remove zero/negative prices
-        zero_negative = (df[['Open', 'High', 'Low', 'Close']] <= 0).any(axis=1)
-        if zero_negative.any():
-            df = df[~zero_negative]
-            logging.warning(f"Removed {zero_negative.sum()} rows with zero/negative prices for {ticker}")
-        
-        # 4. Volume validation
-        df.loc[df['Volume'] < 0, 'Volume'] = 0
-        
-        # 5. Handle extreme price movements (potential errors)
-        if len(df) > 1:
-            returns = df['Close'].pct_change().abs()
+        # Additional validation if requested
+        if validate_data:
+            validated_data = {}
+            for ticker, df in data_dict.items():
+                if _perform_quality_checks(df, ticker):
+                    validated_data[ticker] = df
+                else:
+                    logging.warning(f"Data quality check failed for {ticker}")
             
-            # Flag extreme moves (>80% in a day) as potential errors
-            extreme_threshold = 0.8
-            extreme_moves = returns > extreme_threshold
-            
-            if extreme_moves.any():
-                # Keep extreme moves but log them
-                extreme_dates = df.index[extreme_moves]
-                logging.info(f"Extreme moves detected for {ticker}: {len(extreme_dates)} days")
-                
-                # Only remove if too many extreme moves (likely data error)
-                if extreme_moves.sum() > len(df) * 0.05:
-                    df = df[~extreme_moves]
-                    logging.warning(f"Removed excessive extreme moves for {ticker}")
+            data_dict = validated_data
         
-        # 6. Handle missing values intelligently
-        # Forward fill small gaps
-        missing_mask = df[required_columns].isnull().any(axis=1)
-        if missing_mask.any():
-            gap_size = missing_mask.astype(int).groupby((~missing_mask).cumsum()).sum()
-            small_gaps = gap_size <= 5  # Fill gaps of 5 days or less
-            
-            if small_gaps.any():
-                df = df.fillna(method='ffill', limit=5)
-                df = df.fillna(method='bfill', limit=5)
-            
-            # Remove remaining missing values
-            df = df.dropna(subset=required_columns)
+        # Log summary
+        successful_downloads = len(data_dict)
+        total_data_points = sum(len(df) for df in data_dict.values())
         
-        # 7. Ensure chronological order
-        df = df.sort_index()
+        logging.info(f"Data loading summary:")
+        logging.info(f"  - Successful downloads: {successful_downloads}/{len(valid_tickers)}")
+        logging.info(f"  - Total data points: {total_data_points:,}")
+        logging.info(f"  - Average points per stock: {total_data_points // max(successful_downloads, 1):,}")
         
-        # 8. Data quality assessment
-        data_quality = len(df) / original_length if original_length > 0 else 0
+        # Auto cleanup if enabled
+        if config.get('auto_cleanup', True) and successful_downloads > 0:
+            try:
+                loader.db.cleanup_old_data(days_to_keep=90)
+            except Exception as e:
+                logging.warning(f"Auto cleanup failed: {e}")
         
-        if data_quality < DATA_CONFIG.get('data_quality_threshold', 0.7):
-            logging.warning(f"Low data quality for {ticker}: {data_quality:.2%}")
-        
-        logging.info(f"Data validation complete for {ticker}: {original_length} -> {len(df)} rows")
+        return data_dict
         
     except Exception as e:
-        logging.error(f"Data validation failed for {ticker}: {e}")
-        return pd.DataFrame()
-    
-    return df
-
-# ==================== DATA QUALITY REPORTING ====================
-def generate_data_quality_report(data_dict: Dict[str, pd.DataFrame]):
-    """Generate comprehensive data quality report"""
-    try:
-        report = {
-            'total_tickers': len(data_dict),
-            'successful_tickers': len([k for k, v in data_dict.items() if not v.empty]),
-            'date_ranges': {},
-            'record_counts': {},
-            'data_quality_scores': {}
-        }
-        
-        for ticker, df in data_dict.items():
-            if df.empty:
-                continue
-                
-            # Date range analysis
-            start_date = df.index[0]
-            end_date = df.index[-1]
-            years_of_data = (end_date - start_date).days / 365.25
-            
-            report['date_ranges'][ticker] = {
-                'start': start_date.strftime('%Y-%m-%d'),
-                'end': end_date.strftime('%Y-%m-%d'),
-                'years': round(years_of_data, 1),
-                'records': len(df)
-            }
-            
-            # Data quality metrics
-            missing_pct = df.isnull().sum().sum() / (len(df) * len(df.columns))
-            volume_zero_pct = (df['Volume'] == 0).sum() / len(df) if 'Volume' in df.columns else 0
-            
-            quality_score = 1.0 - (missing_pct * 0.5 + volume_zero_pct * 0.3)
-            report['data_quality_scores'][ticker] = round(quality_score, 3)
-        
-        # Summary statistics
-        if report['date_ranges']:
-            years_list = [info['years'] for info in report['date_ranges'].values()]
-            records_list = [info['records'] for info in report['date_ranges'].values()]
-            quality_scores = list(report['data_quality_scores'].values())
-            
-            print("\n" + "="*60)
-            print("DATA QUALITY REPORT")
-            print("="*60)
-            print(f"Total tickers processed: {report['total_tickers']}")
-            print(f"Successful tickers: {report['successful_tickers']}")
-            print(f"Success rate: {report['successful_tickers']/report['total_tickers']:.1%}")
-            print(f"\nHistorical Data Coverage:")
-            print(f"  Average years of data: {np.mean(years_list):.1f}")
-            print(f"  Maximum years: {max(years_list):.1f}")
-            print(f"  Minimum years: {min(years_list):.1f}")
-            print(f"\nData Volume:")
-            print(f"  Total records: {sum(records_list):,}")
-            print(f"  Average records per ticker: {np.mean(records_list):.0f}")
-            print(f"\nData Quality:")
-            print(f"  Average quality score: {np.mean(quality_scores):.3f}")
-            print(f"  Tickers with quality > 0.9: {sum(1 for s in quality_scores if s > 0.9)}")
-            print("="*60)
-    except Exception as e:
-        logging.error(f"Data quality report generation failed: {e}")
-
-# ==================== MAIN INTERFACE ====================
-def get_comprehensive_stock_data(tickers: Optional[List[str]] = None,
-                               config: Dict = None,
-                               max_tickers: int = None,
-                               selected_tickers: List[str] = None) -> Dict[str, pd.DataFrame]:
-    """Main interface for comprehensive stock data collection"""
-    config = config or DATA_CONFIG
-    
-    # Use selected_tickers if provided, otherwise use default logic
-    if selected_tickers:
-        tickers = selected_tickers
-        print(f"Using user-selected tickers: {len(tickers)} stocks")
-    elif tickers is None:
-        tickers = get_updated_nifty_tickers()
-        print(f"Using default NIFTY tickers: {len(tickers)} stocks")
-        
-    if max_tickers and not selected_tickers:
-        tickers = tickers[:max_tickers]
-        print(f"Limited to max_tickers: {len(tickers)} stocks")
-    
-    print(f"Starting comprehensive data collection...")
-    print(f"Target tickers: {len(tickers)}")
-    print(f"Selected stocks: {tickers}")
-    print(f"Max period: {config['max_period']}")
-    print(f"Database enabled: {config['use_database']}")
-    
-    # Fetch enhanced data
-    try:
-        data = fetch_historical_data_enhanced(tickers, config)
-        return data
-    except Exception as e:
-        logging.error(f"Comprehensive data collection failed: {e}")
+        logging.error(f"Comprehensive data loading failed: {e}")
         return {}
 
-# ==================== COMPATIBILITY FUNCTIONS ====================
-# These are added for backward compatibility with existing code
+def _perform_quality_checks(df: pd.DataFrame, ticker: str) -> bool:
+    """Perform additional data quality checks"""
+    
+    try:
+        if df.empty:
+            return False
+        
+        # Check minimum data points
+        if len(df) < DATA_CONFIG.get('min_data_points', 100):
+            logging.warning(f"Insufficient data points for {ticker}: {len(df)}")
+            return False
+        
+        # Check for required columns
+        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        if not all(col in df.columns for col in required_columns):
+            logging.warning(f"Missing required columns for {ticker}")
+            return False
+        
+        # Check for reasonable data distribution
+        price_columns = ['Open', 'High', 'Low', 'Close']
+        for col in price_columns:
+            if df[col].min() <= 0:
+                logging.warning(f"Invalid prices found in {col} for {ticker}")
+                return False
+        
+        # Check for excessive missing data
+        missing_ratio = df.isnull().sum().sum() / (len(df) * len(df.columns))
+        if missing_ratio > 0.1:  # 10% threshold
+            logging.warning(f"Excessive missing data for {ticker}: {missing_ratio:.1%}")
+            return False
+        
+        # Check for data recency (should have recent data)
+        latest_date = df.index[-1]
+        days_old = (datetime.now() - latest_date).days
+        if days_old > 7:  # Data should be within last week
+            logging.warning(f"Data too old for {ticker}: {days_old} days")
+            return False
+        
+        logging.debug(f"Quality checks passed for {ticker}")
+        return True
+        
+    except Exception as e:
+        logging.error(f"Quality check failed for {ticker}: {e}")
+        return False
 
-def fetch_historical_data(tickers: List[str], period: str = "5y") -> Dict[str, pd.DataFrame]:
-    """Backward compatibility function"""
-    config = DATA_CONFIG.copy()
-    config['max_period'] = period
-    return fetch_historical_data_enhanced(tickers, config)
+def get_stock_info(ticker: str) -> Dict[str, Any]:
+    """Get additional stock information"""
+    
+    try:
+        available_tickers = get_available_tickers()
+        
+        if ticker not in available_tickers:
+            return {'error': f'Ticker {ticker} not found'}
+        
+        info = available_tickers[ticker].copy()
+        
+        # Try to get additional info from yfinance
+        try:
+            stock = yf.Ticker(ticker)
+            yf_info = stock.info
+            
+            # Extract useful information
+            if yf_info:
+                info.update({
+                    'market_cap': yf_info.get('marketCap'),
+                    'pe_ratio': yf_info.get('trailingPE'),
+                    'dividend_yield': yf_info.get('dividendYield'),
+                    'beta': yf_info.get('beta'),
+                    'price': yf_info.get('currentPrice'),
+                    'currency': yf_info.get('currency', 'INR')
+                })
+                
+        except Exception as e:
+            logging.warning(f"Could not fetch additional info for {ticker}: {e}")
+        
+        return info
+        
+    except Exception as e:
+        logging.error(f"Failed to get stock info for {ticker}: {e}")
+        return {'error': str(e)}
 
-def get_nifty_50_tickers() -> List[str]:
-    """Backward compatibility function"""
-    return get_updated_nifty_tickers()
+def refresh_all_data(force: bool = False) -> Dict[str, bool]:
+    """Refresh all available stock data"""
+    
+    try:
+        available_tickers = list(get_available_tickers().keys())
+        
+        logging.info(f"Refreshing data for {len(available_tickers)} stocks")
+        
+        # Use comprehensive data loader
+        results = get_comprehensive_stock_data(
+            selected_tickers=available_tickers,
+            force_refresh=force,
+            parallel=True
+        )
+        
+        # Return success status for each ticker
+        success_status = {}
+        for ticker in available_tickers:
+            success_status[ticker] = ticker in results
+        
+        successful_count = sum(success_status.values())
+        
+        logging.info(f"Data refresh completed: {successful_count}/{len(available_tickers)} successful")
+        
+        return success_status
+        
+    except Exception as e:
+        logging.error(f"Data refresh failed: {e}")
+        return {}
 
-# ==================== EXAMPLE USAGE ====================
+# ==================== UTILITY FUNCTIONS ====================
+
+def get_market_status() -> Dict[str, Any]:
+    """Get current market status"""
+    
+    try:
+        now = datetime.now()
+        
+        # NSE trading hours: 9:15 AM to 3:30 PM IST, Monday to Friday
+        market_open_time = now.replace(hour=9, minute=15, second=0, microsecond=0)
+        market_close_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
+        
+        is_weekend = now.weekday() >= 5  # Saturday = 5, Sunday = 6
+        is_trading_hours = market_open_time <= now <= market_close_time
+        
+        market_status = "CLOSED"
+        if not is_weekend and is_trading_hours:
+            market_status = "OPEN"
+        elif not is_weekend and now < market_open_time:
+            market_status = "PRE_MARKET"
+        elif not is_weekend and now > market_close_time:
+            market_status = "AFTER_MARKET"
+        
+        return {
+            'status': market_status,
+            'is_trading_day': not is_weekend,
+            'current_time': now,
+            'market_open': market_open_time,
+            'market_close': market_close_time,
+            'next_trading_day': _get_next_trading_day(now)
+        }
+        
+    except Exception as e:
+        logging.error(f"Failed to get market status: {e}")
+        return {'status': 'UNKNOWN', 'error': str(e)}
+
+def _get_next_trading_day(current_time: datetime) -> datetime:
+    """Get next trading day"""
+    
+    next_day = current_time + timedelta(days=1)
+    
+    # Skip weekends
+    while next_day.weekday() >= 5:
+        next_day += timedelta(days=1)
+    
+    # Set to market open time
+    return next_day.replace(hour=9, minute=15, second=0, microsecond=0)
+
+def estimate_download_time(num_tickers: int) -> float:
+    """Estimate download time in seconds"""
+    
+    # Rough estimates based on experience
+    base_time_per_ticker = 2.0  # seconds
+    parallel_efficiency = 0.4  # 40% efficiency for parallel downloads
+    
+    if num_tickers <= 1:
+        return base_time_per_ticker
+    elif num_tickers <= 4:
+        return base_time_per_ticker * num_tickers * parallel_efficiency
+    else:
+        # For larger batches, assume some overhead
+        return base_time_per_ticker * num_tickers * parallel_efficiency * 1.2
+
+# ==================== EXPORT AND TESTING ====================
+
+# Export main functions and classes
+__all__ = [
+    'get_comprehensive_stock_data',
+    'get_available_tickers', 
+    'get_tickers_by_sector',
+    'get_stock_info',
+    'refresh_all_data',
+    'get_market_status',
+    'DATA_CONFIG',
+    'NIFTY_50_TICKERS',
+    'EnhancedDataLoader',
+    'StockDataDB'
+]
+
+# Example usage and testing
 if __name__ == "__main__":
     print("Enhanced Stock Data Loader - User Selection Version")
     print("="*60)
     
-    # Test the system with user selection
+    # Test basic functionality
+    print("Available sectors:")
+    sectors = set(info['sector'] for info in get_available_tickers().values())
+    for sector in sorted(sectors):
+        tickers = get_tickers_by_sector(sector)
+        print(f"  - {sector}: {len(tickers)} stocks")
+    
+    # Test market status
+    market_status = get_market_status()
+    print(f"\nMarket Status: {market_status['status']}")
+    print(f"Is Trading Day: {market_status['is_trading_day']}")
+    
+    # Test download for selected stocks
+    selected_test_tickers = ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS']
+    print(f"\nTesting download for selected stocks: {selected_test_tickers}")
+    
+    estimated_time = estimate_download_time(len(selected_test_tickers))
+    print(f"Estimated download time: {estimated_time:.1f} seconds")
+    
     try:
-        # Simulate user selection
-        all_tickers = get_updated_nifty_tickers()
-        selected_tickers = all_tickers[:5]  # Select first 5 for testing
+        start_time = time.time()
         
-        print(f"Available tickers: {len(all_tickers)}")
-        print(f"User selected: {len(selected_tickers)} tickers")
-        for ticker in selected_tickers:
-            print(f"  - {ticker}")
+        # Test comprehensive data loading
+        data = get_comprehensive_stock_data(
+            selected_tickers=selected_test_tickers,
+            period='1y',  # Use shorter period for testing
+            force_refresh=False,  # Use cache if available
+            parallel=True
+        )
         
-        # Fetch data for selected tickers only
-        data = get_comprehensive_stock_data(selected_tickers=selected_tickers)
+        actual_time = time.time() - start_time
         
+        print(f"Actual download time: {actual_time:.1f} seconds")
+        print(f"Successfully downloaded: {len(data)}/{len(selected_test_tickers)} stocks")
+        
+        for ticker, df in data.items():
+            print(f"  - {ticker}: {len(df)} data points ({df.index[0].date()} to {df.index[-1].date()})")
+        
+        # Test stock info
         if data:
-            print(f"\nSuccessfully loaded data for {len(data)} selected tickers")
-            for ticker, df in data.items():
-                if not df.empty:
-                    print(f"  {ticker}: {len(df)} records from {df.index[0].strftime('%Y-%m-%d')} to {df.index[-1].strftime('%Y-%m-%d')}")
-                else:
-                    print(f"  {ticker}: No data")
-        else:
-            print("No data loaded")
-            
+            test_ticker = list(data.keys())[0]
+            stock_info = get_stock_info(test_ticker)
+            print(f"\nStock info for {test_ticker}:")
+            for key, value in stock_info.items():
+                if key != 'error':
+                    print(f"  - {key}: {value}")
+    
     except Exception as e:
         print(f"Test failed: {e}")
-        
-    print("\nUser Selection Features:")
-    print("  ✓ Support for user-selected stocks only")
-    print("  ✓ Faster processing with fewer stocks")
-    print("  ✓ Resource-efficient data fetching")
-    print("  ✓ Backward compatibility maintained")
-    print("  ✓ Enhanced error handling and logging")
+    
+    print(f"\nUser Selection Features:")
+    print(f"  ✓ Optimized for user-selected stocks only")
+    print(f"  ✓ Intelligent caching and database storage")
+    print(f"  ✓ Parallel downloading for performance")
+    print(f"  ✓ Comprehensive data validation")
+    print(f"  ✓ Robust error handling and retries")
+    print(f"  ✓ Sector-based filtering")
+    print(f"  ✓ Market status monitoring")
+    print(f"  ✓ Automatic data cleanup")
+    
+    print(f"\nData Loader Test Completed!")

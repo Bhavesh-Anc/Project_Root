@@ -1,4 +1,4 @@
-# utils/backtesting.py
+# utils/backtesting.py - Complete Enhanced Backtesting System
 import pandas as pd
 import numpy as np
 import logging
@@ -34,6 +34,27 @@ class BacktestConfig:
     position_sizing_method: str = 'equal_weight'  # 'equal_weight', 'risk_parity', 'kelly'
     lookback_window: int = 252  # Days for rolling calculations
     confidence_level: float = 0.95  # For VaR calculations
+
+@dataclass
+class EnhancedBacktestConfig(BacktestConfig):
+    """Enhanced configuration with risk management features"""
+    # Risk management parameters
+    max_correlation: float = 0.7
+    max_drawdown_limit: float = 0.15
+    var_confidence: float = 0.95
+    stress_test_frequency: int = 20  # days
+    position_sizing_method: str = 'kelly'  # 'kelly', 'risk_parity', 'equal_weight'
+    
+    # Enhanced features
+    enable_dynamic_hedging: bool = True
+    enable_correlation_monitoring: bool = True
+    enable_stress_testing: bool = True
+    rebalance_on_risk_breach: bool = True
+    
+    # ML Strategy parameters
+    prediction_confidence_threshold: float = 0.6
+    ensemble_weight_decay: float = 0.1
+    signal_aggregation_method: str = 'weighted_average'
 
 @dataclass
 class Trade:
@@ -83,133 +104,54 @@ class PerformanceMetrics:
     
     @staticmethod
     def sortino_ratio(returns: pd.Series, risk_free_rate: float = 0.06) -> float:
-        """Calculate Sortino ratio (downside deviation)"""
+        """Calculate Sortino ratio"""
         excess_returns = returns - risk_free_rate / 252
-        downside_returns = excess_returns[excess_returns < 0]
-        if len(downside_returns) == 0 or downside_returns.std() == 0:
-            return 0.0
-        return excess_returns.mean() / downside_returns.std() * np.sqrt(252)
-    
-    @staticmethod
-    def calmar_ratio(returns: pd.Series, portfolio_values: pd.Series) -> float:
-        """Calculate Calmar ratio (return/max drawdown)"""
-        annual_return = (portfolio_values.iloc[-1] / portfolio_values.iloc[0]) ** (252 / len(portfolio_values)) - 1
-        max_drawdown = PerformanceMetrics.max_drawdown(portfolio_values)
-        if max_drawdown == 0:
-            return 0.0
-        return annual_return / abs(max_drawdown)
+        negative_returns = excess_returns[excess_returns < 0]
+        
+        if len(negative_returns) == 0:
+            return np.inf
+        
+        downside_deviation = negative_returns.std()
+        if downside_deviation == 0:
+            return 0
+        
+        return excess_returns.mean() / downside_deviation * np.sqrt(252)
     
     @staticmethod
     def max_drawdown(portfolio_values: pd.Series) -> float:
         """Calculate maximum drawdown"""
-        peak = portfolio_values.cummax()
+        peak = portfolio_values.expanding().max()
         drawdown = (portfolio_values - peak) / peak
         return drawdown.min()
     
     @staticmethod
     def value_at_risk(returns: pd.Series, confidence_level: float = 0.95) -> float:
         """Calculate Value at Risk"""
+        if len(returns) == 0:
+            return 0.0
         return np.percentile(returns, (1 - confidence_level) * 100)
     
     @staticmethod
-    def conditional_var(returns: pd.Series, confidence_level: float = 0.95) -> float:
-        """Calculate Conditional Value at Risk (Expected Shortfall)"""
-        var = PerformanceMetrics.value_at_risk(returns, confidence_level)
-        return returns[returns <= var].mean()
-    
-    @staticmethod
-    def win_rate(trades: List[Trade]) -> float:
-        """Calculate percentage of winning trades"""
-        if not trades:
+    def calmar_ratio(portfolio_values: pd.Series) -> float:
+        """Calculate Calmar ratio"""
+        if len(portfolio_values) < 2:
             return 0.0
-        winning_trades = sum(1 for trade in trades if trade.net_pnl > 0)
-        return winning_trades / len(trades)
-    
-    @staticmethod
-    def profit_factor(trades: List[Trade]) -> float:
-        """Calculate profit factor (gross profit / gross loss)"""
-        if not trades:
-            return 0.0
-        gross_profit = sum(trade.net_pnl for trade in trades if trade.net_pnl > 0)
-        gross_loss = abs(sum(trade.net_pnl for trade in trades if trade.net_pnl < 0))
-        if gross_loss == 0:
-            return float('inf') if gross_profit > 0 else 0.0
-        return gross_profit / gross_loss
-    
-    @staticmethod
-    def average_trade_duration(trades: List[Trade]) -> float:
-        """Calculate average holding period in days"""
-        if not trades:
-            return 0.0
-        return np.mean([trade.holding_period for trade in trades])
-
-class RiskManager:
-    """Risk management and position sizing"""
-    
-    def __init__(self, config: BacktestConfig):
-        self.config = config
         
-    def calculate_position_size(self, signal_strength: float, portfolio_value: float, 
-                              stock_price: float, volatility: float = None) -> int:
-        """Calculate position size based on method"""
+        total_return = (portfolio_values.iloc[-1] / portfolio_values.iloc[0]) - 1
+        max_dd = abs(PerformanceMetrics.max_drawdown(portfolio_values))
         
-        if self.config.position_sizing_method == 'equal_weight':
-            target_value = portfolio_value * 0.05  # 5% per position
-            return int(target_value / stock_price)
-            
-        elif self.config.position_sizing_method == 'risk_parity':
-            if volatility is None:
-                volatility = 0.02  # Default 2% daily volatility
-            risk_budget = portfolio_value * 0.01  # 1% risk per position
-            position_value = risk_budget / volatility
-            return int(position_value / stock_price)
-            
-        elif self.config.position_sizing_method == 'kelly':
-            # Simplified Kelly criterion
-            if signal_strength <= 0.5:
-                return 0
-            win_prob = signal_strength
-            avg_win = 0.05  # Assume 5% average win
-            avg_loss = 0.03  # Assume 3% average loss
-            kelly_fraction = (win_prob * avg_win - (1 - win_prob) * avg_loss) / avg_win
-            kelly_fraction = max(0, min(kelly_fraction, 0.25))  # Cap at 25%
-            target_value = portfolio_value * kelly_fraction
-            return int(target_value / stock_price)
+        if max_dd == 0:
+            return np.inf
         
-        else:
-            # Default equal weight
-            target_value = portfolio_value * 0.05
-            return int(target_value / stock_price)
-    
-    def apply_risk_limits(self, quantity: int, stock_price: float) -> int:
-        """Apply position size limits"""
-        position_value = quantity * stock_price
-        
-        # Apply minimum position size
-        if position_value < self.config.min_position_size:
-            return 0
-            
-        # Apply maximum position size
-        if position_value > self.config.max_position_size:
-            return int(self.config.max_position_size / stock_price)
-            
-        return quantity
-    
-    def check_portfolio_risk(self, portfolio_state: PortfolioState) -> Dict[str, bool]:
-        """Check various risk constraints"""
-        checks = {
-            'max_drawdown_ok': portfolio_state.drawdown > -self.config.max_drawdown_limit,
-            'max_positions_ok': len(portfolio_state.positions) <= self.config.max_positions,
-            'leverage_ok': portfolio_state.leverage <= 1.0,  # No leverage for now
-        }
-        return checks
+        annual_return = (1 + total_return) ** (252 / len(portfolio_values)) - 1
+        return annual_return / max_dd
 
 class Strategy(ABC):
     """Abstract base class for trading strategies"""
     
     @abstractmethod
-    def generate_signals(self, data: pd.DataFrame, date: datetime) -> Dict[str, float]:
-        """Generate trading signals for given date"""
+    def generate_signals(self, data: Dict[str, pd.DataFrame], date: datetime) -> Dict[str, float]:
+        """Generate trading signals for given date and data"""
         pass
     
     @abstractmethod
@@ -219,645 +161,685 @@ class Strategy(ABC):
         pass
 
 class MLStrategy(Strategy):
-    """Machine Learning based strategy using your existing models"""
+    """Machine Learning Strategy for backtesting"""
     
-    def __init__(self, models: Dict, featured_data: Dict, horizon: str = 'next_month'):
+    def __init__(self, models: Dict, config: Dict = None):
         self.models = models
-        self.featured_data = featured_data
-        self.horizon = horizon
+        self.config = config or {}
+        self.prediction_horizon = self.config.get('investment_horizon', 'next_month')
+        self.confidence_threshold = self.config.get('prediction_confidence_threshold', 0.6)
         
-    def generate_signals(self, data: pd.DataFrame, date: datetime) -> Dict[str, float]:
-        """Generate signals from ML models"""
+    def generate_signals(self, data: Dict[str, pd.DataFrame], date: datetime) -> Dict[str, float]:
+        """Generate ML-based trading signals"""
         signals = {}
         
-        for ticker in self.models.keys():
-            if ticker not in self.featured_data:
-                continue
-                
-            ticker_data = self.featured_data[ticker]
-            # Get data up to current date
-            historical_data = ticker_data[ticker_data.index <= date]
-            
-            if len(historical_data) < 50:  # Need minimum history
+        for ticker in data.keys():
+            if ticker not in self.models:
                 continue
                 
             try:
-                # Get the latest data point
-                latest_data = historical_data.iloc[[-1]]
+                # Get the data up to current date
+                df = data[ticker]
+                current_data = df[df.index <= date]
                 
-                # Get model predictions
-                ticker_models = self.models[ticker]
-                predictions = []
-                confidences = []
+                if len(current_data) < 50:  # Need minimum data
+                    continue
                 
-                for model_key, model in ticker_models.items():
-                    if self.horizon in model_key:
-                        try:
-                            prob = model.predict_proba(latest_data, ticker)[0][1]
-                            pred = model.predict(latest_data, ticker)[0]
-                            confidence = model.validation_score if hasattr(model, 'validation_score') else 0.5
-                            
-                            predictions.append(prob)
-                            confidences.append(confidence)
-                        except Exception as e:
-                            logging.warning(f"Model prediction failed for {ticker}: {e}")
-                            continue
+                # Basic feature engineering for prediction
+                features = self._prepare_features(current_data)
                 
-                if predictions:
-                    # Weight predictions by confidence
-                    if sum(confidences) > 0:
-                        weighted_prob = sum(p * c for p, c in zip(predictions, confidences)) / sum(confidences)
-                    else:
-                        weighted_prob = np.mean(predictions)
-                    
-                    signals[ticker] = weighted_prob
-                    
+                if features is None or len(features) == 0:
+                    continue
+                
+                # Get model prediction
+                model = self.models[ticker]
+                if hasattr(model, 'predict_proba'):
+                    prediction = model.predict_proba([features])[-1]
+                    confidence = max(prediction) if len(prediction) > 0 else 0.5
+                    signal = 1.0 if prediction[1] > prediction[0] else 0.0
+                else:
+                    prediction = model.predict([features])[0]
+                    confidence = abs(prediction)
+                    signal = 1.0 if prediction > 0 else 0.0
+                
+                # Only generate signal if confidence is above threshold
+                if confidence >= self.confidence_threshold:
+                    signals[ticker] = signal * confidence
+                
             except Exception as e:
                 logging.warning(f"Signal generation failed for {ticker}: {e}")
                 continue
-                
+        
         return signals
+    
+    def _prepare_features(self, df: pd.DataFrame) -> List[float]:
+        """Prepare features for ML model prediction"""
+        try:
+            if len(df) < 20:
+                return None
+            
+            # Calculate basic technical features
+            features = []
+            
+            # Price features
+            features.append(df['Close'].iloc[-1] / df['Close'].iloc[-20] - 1)  # 20-day return
+            features.append(df['Close'].iloc[-1] / df['Close'].iloc[-5] - 1)   # 5-day return
+            
+            # Moving averages
+            sma_20 = df['Close'].rolling(20).mean().iloc[-1]
+            sma_5 = df['Close'].rolling(5).mean().iloc[-1]
+            features.append((sma_5 / sma_20) - 1)  # MA ratio
+            
+            # Volatility
+            returns = df['Close'].pct_change().dropna()
+            if len(returns) > 1:
+                features.append(returns.std())  # Historical volatility
+            else:
+                features.append(0.02)  # Default volatility
+            
+            # Volume features
+            if 'Volume' in df.columns:
+                vol_ma = df['Volume'].rolling(20).mean().iloc[-1]
+                current_vol = df['Volume'].iloc[-1]
+                features.append(current_vol / vol_ma if vol_ma > 0 else 1.0)
+            else:
+                features.append(1.0)  # Default volume ratio
+            
+            return features
+            
+        except Exception as e:
+            logging.warning(f"Feature preparation failed: {e}")
+            return None
     
     def should_exit(self, ticker: str, entry_date: datetime, current_date: datetime, 
                    current_price: float, entry_price: float) -> bool:
-        """Exit logic based on time and profit/loss"""
-        
-        # Time-based exit
-        holding_period = (current_date - entry_date).days
-        if holding_period > 30:  # Exit after 30 days for monthly horizon
-            return True
-            
-        # Profit/loss based exit
+        """Enhanced exit logic"""
+        days_held = (current_date - entry_date).days
         return_pct = (current_price - entry_price) / entry_price
         
-        # Take profit at 10%
-        if return_pct > 0.10:
-            return True
-            
-        # Stop loss at -5%
-        if return_pct < -0.05:
-            return True
-            
-        return False
+        # Exit conditions
+        max_holding_period = self.config.get('max_holding_period', 60)
+        profit_target = self.config.get('profit_target', 0.20)
+        stop_loss = self.config.get('stop_loss', -0.10)
+        
+        return (days_held >= max_holding_period or 
+                return_pct >= profit_target or 
+                return_pct <= stop_loss)
 
 class BacktestEngine:
     """Main backtesting engine"""
     
     def __init__(self, config: BacktestConfig):
         self.config = config
-        self.risk_manager = RiskManager(config)
-        self.portfolio_state = PortfolioState(cash=config.initial_capital)
-        self.trades: List[Trade] = []
+        self.portfolio = PortfolioState(cash=config.initial_capital)
+        self.trades = []
         self.portfolio_history = []
-        self.benchmark_data = None
         
-    def load_benchmark_data(self, benchmark_file: str = None):
-        """Load benchmark data for comparison"""
-        # Placeholder - you would load NIFTY50 data here
-        # For now, simulate benchmark returns
-        dates = pd.date_range('2020-01-01', '2023-12-31', freq='D')
-        benchmark_returns = np.random.normal(0.0005, 0.015, len(dates))  # Simulate market returns
-        self.benchmark_data = pd.Series(benchmark_returns, index=dates)
+    def run_backtest(self, strategy: Strategy, data: Dict[str, pd.DataFrame], 
+                    start_date: datetime, end_date: datetime) -> Dict:
+        """Run backtest for given strategy and data"""
         
-    def calculate_slippage(self, price: float, quantity: int, direction: str) -> float:
-        """Calculate realistic slippage based on order size"""
-        base_slippage = price * self.config.slippage_pct
-        
-        # Increase slippage for larger orders
-        size_factor = min(2.0, quantity / 1000)  # Cap at 2x slippage
-        
-        # Direction matters - buying increases price, selling decreases
-        slippage_direction = 1 if direction == 'buy' else -1
-        
-        return base_slippage * size_factor * slippage_direction
-        
-    def execute_trade(self, ticker: str, quantity: int, price: float, 
-                     direction: str, date: datetime, signal: str) -> bool:
-        """Execute a trade with realistic costs"""
-        
-        if quantity <= 0:
-            return False
+        try:
+            # Initialize
+            self.portfolio = PortfolioState(cash=self.config.initial_capital)
+            self.portfolio.peak_value = self.config.initial_capital
+            self.trades = []
+            self.portfolio_history = []
             
-        # Calculate slippage
-        slippage = self.calculate_slippage(price, quantity, direction)
-        execution_price = price + slippage
-        
-        # Calculate transaction costs
-        trade_value = quantity * execution_price
-        transaction_cost = trade_value * self.config.transaction_cost_pct
-        
-        total_cost = trade_value + transaction_cost
-        
-        if direction == 'buy':
-            # Check if we have enough cash
-            if total_cost > self.portfolio_state.cash:
-                return False
+            # Get all dates in the range
+            all_dates = set()
+            for df in data.values():
+                dates_in_range = df[(df.index >= start_date) & (df.index <= end_date)].index
+                all_dates.update(dates_in_range)
+            
+            all_dates = sorted(list(all_dates))
+            
+            if len(all_dates) == 0:
+                return {'error': 'No data available for the specified date range'}
+            
+            # Run backtest day by day
+            for date in all_dates:
+                self._process_day(strategy, data, date)
                 
-            # Execute buy order
-            self.portfolio_state.cash -= total_cost
-            self.portfolio_state.positions[ticker] = {
+                # Record portfolio state
+                portfolio_value = self._calculate_portfolio_value(data, date)
+                self.portfolio.portfolio_value = portfolio_value
+                
+                # Update drawdown
+                if portfolio_value > self.portfolio.peak_value:
+                    self.portfolio.peak_value = portfolio_value
+                    self.portfolio.drawdown = 0
+                else:
+                    self.portfolio.drawdown = (portfolio_value - self.portfolio.peak_value) / self.portfolio.peak_value
+                
+                # Check drawdown limit
+                if abs(self.portfolio.drawdown) > self.config.max_drawdown_limit:
+                    logging.warning(f"Drawdown limit exceeded on {date}: {self.portfolio.drawdown:.2%}")
+                    # Close all positions
+                    self._close_all_positions(data, date)
+                
+                self.portfolio_history.append({
+                    'date': date,
+                    'portfolio_value': portfolio_value,
+                    'cash': self.portfolio.cash,
+                    'positions': len(self.portfolio.positions),
+                    'drawdown': self.portfolio.drawdown
+                })
+            
+            # Prepare results
+            results = self._prepare_results()
+            return results
+            
+        except Exception as e:
+            logging.error(f"Backtest failed: {str(e)}")
+            return {'error': f'Backtest failed: {str(e)}'}
+    
+    def _process_day(self, strategy: Strategy, data: Dict[str, pd.DataFrame], date: datetime):
+        """Process a single day of backtesting"""
+        
+        # Check exit conditions for existing positions
+        positions_to_close = []
+        for ticker, position in self.portfolio.positions.items():
+            if ticker in data and date in data[ticker].index:
+                current_price = data[ticker].loc[date, 'Close']
+                
+                if strategy.should_exit(ticker, position['entry_date'], date, 
+                                      current_price, position['entry_price']):
+                    positions_to_close.append(ticker)
+        
+        # Close positions
+        for ticker in positions_to_close:
+            self._close_position(ticker, data, date)
+        
+        # Generate new signals
+        signals = strategy.generate_signals(data, date)
+        
+        # Process signals for new positions
+        for ticker, signal in signals.items():
+            if (ticker not in self.portfolio.positions and 
+                ticker in data and date in data[ticker].index and
+                signal > 0.5):  # Buy signal threshold
+                
+                self._open_position(ticker, data, date, signal)
+    
+    def _open_position(self, ticker: str, data: Dict[str, pd.DataFrame], 
+                      date: datetime, signal: float):
+        """Open a new position"""
+        
+        if len(self.portfolio.positions) >= self.config.max_positions:
+            return
+        
+        try:
+            current_price = data[ticker].loc[date, 'Close']
+            
+            # Calculate position size
+            position_value = self._calculate_position_size(signal)
+            
+            if position_value < self.config.min_position_size or position_value > self.portfolio.cash:
+                return
+            
+            # Calculate quantity and costs
+            quantity = int(position_value / current_price)
+            actual_cost = quantity * current_price
+            transaction_cost = actual_cost * self.config.transaction_cost_pct
+            total_cost = actual_cost + transaction_cost
+            
+            if total_cost > self.portfolio.cash:
+                return
+            
+            # Update portfolio
+            self.portfolio.cash -= total_cost
+            self.portfolio.positions[ticker] = {
                 'quantity': quantity,
-                'entry_price': execution_price,
+                'entry_price': current_price,
                 'entry_date': date,
-                'entry_signal': signal,
+                'entry_signal': f'ML_Signal_{signal:.3f}',
                 'transaction_cost': transaction_cost
             }
             
-        elif direction == 'sell':
-            # Check if we have the position
-            if ticker not in self.portfolio_state.positions:
-                return False
-                
-            position = self.portfolio_state.positions[ticker]
+        except Exception as e:
+            logging.warning(f"Failed to open position for {ticker}: {e}")
+    
+    def _close_position(self, ticker: str, data: Dict[str, pd.DataFrame], date: datetime):
+        """Close an existing position"""
+        
+        if ticker not in self.portfolio.positions:
+            return
+        
+        try:
+            position = self.portfolio.positions[ticker]
+            current_price = data[ticker].loc[date, 'Close']
+            
+            # Calculate proceeds and costs
+            gross_proceeds = position['quantity'] * current_price
+            transaction_cost = gross_proceeds * self.config.transaction_cost_pct
+            net_proceeds = gross_proceeds - transaction_cost
+            
+            # Calculate P&L
+            entry_cost = position['quantity'] * position['entry_price']
+            gross_pnl = gross_proceeds - entry_cost
+            net_pnl = gross_pnl - position['transaction_cost'] - transaction_cost
+            return_pct = net_pnl / entry_cost
             
             # Create trade record
-            holding_period = (date - position['entry_date']).days
-            gross_pnl = quantity * (execution_price - position['entry_price'])
-            total_transaction_cost = position['transaction_cost'] + transaction_cost
-            net_pnl = gross_pnl - total_transaction_cost
-            return_pct = net_pnl / (quantity * position['entry_price'])
-            
             trade = Trade(
                 ticker=ticker,
                 entry_date=position['entry_date'],
                 exit_date=date,
                 entry_price=position['entry_price'],
-                exit_price=execution_price,
-                quantity=quantity,
+                exit_price=current_price,
+                quantity=position['quantity'],
                 direction='long',
                 entry_signal=position['entry_signal'],
-                exit_signal=signal,
+                exit_signal='Exit_Strategy',
                 gross_pnl=gross_pnl,
-                transaction_costs=total_transaction_cost,
+                transaction_costs=position['transaction_cost'] + transaction_cost,
                 net_pnl=net_pnl,
                 return_pct=return_pct,
-                holding_period=holding_period
+                holding_period=(date - position['entry_date']).days
             )
             
             self.trades.append(trade)
             
-            # Add cash back
-            self.portfolio_state.cash += trade_value - transaction_cost
+            # Update portfolio
+            self.portfolio.cash += net_proceeds
+            del self.portfolio.positions[ticker]
             
-            # Remove position
-            del self.portfolio_state.positions[ticker]
-            
-        return True
+        except Exception as e:
+            logging.warning(f"Failed to close position for {ticker}: {e}")
     
-    def update_portfolio_value(self, current_prices: Dict[str, float]):
-        """Update current portfolio value"""
-        position_value = 0.0
+    def _close_all_positions(self, data: Dict[str, pd.DataFrame], date: datetime):
+        """Close all open positions"""
+        tickers_to_close = list(self.portfolio.positions.keys())
+        for ticker in tickers_to_close:
+            if ticker in data and date in data[ticker].index:
+                self._close_position(ticker, data, date)
+    
+    def _calculate_position_size(self, signal: float) -> float:
+        """Calculate position size based on configuration"""
         
-        for ticker, position in self.portfolio_state.positions.items():
-            if ticker in current_prices:
-                position_value += position['quantity'] * current_prices[ticker]
-                
-        self.portfolio_state.portfolio_value = self.portfolio_state.cash + position_value
+        if self.config.position_sizing_method == 'equal_weight':
+            # Equal weight among maximum positions
+            return self.portfolio.cash / self.config.max_positions
         
-        # Update drawdown tracking
-        if self.portfolio_state.portfolio_value > self.portfolio_state.peak_value:
-            self.portfolio_state.peak_value = self.portfolio_state.portfolio_value
-            self.portfolio_state.drawdown = 0.0
+        elif self.config.position_sizing_method == 'signal_weighted':
+            # Weight by signal strength
+            base_size = self.portfolio.cash / self.config.max_positions
+            return base_size * signal
+        
         else:
-            self.portfolio_state.drawdown = (self.portfolio_state.portfolio_value - self.portfolio_state.peak_value) / self.portfolio_state.peak_value
-            
-    def run_backtest(self, strategy: Strategy, data: Dict[str, pd.DataFrame], 
-                    start_date: datetime, end_date: datetime) -> Dict:
-        """Run the complete backtest"""
-        
-        logging.info(f"Starting backtest from {start_date} to {end_date}")
-        
-        # Initialize
-        self.portfolio_state = PortfolioState(cash=self.config.initial_capital)
-        self.portfolio_state.peak_value = self.config.initial_capital
-        self.trades = []
-        self.portfolio_history = []
-        
-        # Get all available dates from data
-        all_dates = set()
-        for ticker_data in data.values():
-            all_dates.update(ticker_data.index)
-        
-        trading_dates = sorted([d for d in all_dates if start_date <= d <= end_date])
-        
-        # Rebalancing logic
-        last_rebalance = None
-        rebalance_freq_map = {
-            'daily': 1,
-            'weekly': 7,
-            'monthly': 30,
-            'quarterly': 90
-        }
-        rebalance_days = rebalance_freq_map.get(self.config.rebalance_frequency, 30)
-        
-        for current_date in trading_dates:
-            try:
-                # Get current prices
-                current_prices = {}
-                for ticker, ticker_data in data.items():
-                    if current_date in ticker_data.index:
-                        current_prices[ticker] = ticker_data.loc[current_date, 'Close']
-                
-                if not current_prices:
-                    continue
-                
-                # Update portfolio value
-                self.update_portfolio_value(current_prices)
-                
-                # Check risk constraints
-                risk_checks = self.risk_manager.check_portfolio_risk(self.portfolio_state)
-                if not all(risk_checks.values()):
-                    logging.warning(f"Risk constraint violated on {current_date}: {risk_checks}")
-                    # In severe cases, liquidate positions
-                    if not risk_checks['max_drawdown_ok']:
-                        self._liquidate_all_positions(current_prices, current_date, "Risk limit breach")
-                
-                # Check for exit signals on existing positions
-                positions_to_exit = []
-                for ticker in list(self.portfolio_state.positions.keys()):
-                    if ticker in current_prices:
-                        position = self.portfolio_state.positions[ticker]
-                        should_exit = strategy.should_exit(
-                            ticker, position['entry_date'], current_date,
-                            current_prices[ticker], position['entry_price']
-                        )
-                        
-                        if should_exit:
-                            positions_to_exit.append(ticker)
-                
-                # Execute exits
-                for ticker in positions_to_exit:
-                    position = self.portfolio_state.positions[ticker]
-                    self.execute_trade(
-                        ticker, position['quantity'], current_prices[ticker],
-                        'sell', current_date, "Exit signal"
-                    )
-                
-                # Check if it's time to rebalance
-                should_rebalance = False
-                if last_rebalance is None:
-                    should_rebalance = True
-                elif (current_date - last_rebalance).days >= rebalance_days:
-                    should_rebalance = True
-                
-                if should_rebalance:
-                    # Generate new signals
-                    signals = strategy.generate_signals(data, current_date)
-                    
-                    # Filter and rank signals
-                    valid_signals = {k: v for k, v in signals.items() 
-                                   if v > 0.6 and k in current_prices}  # Only strong buy signals
-                    
-                    # Sort by signal strength
-                    sorted_signals = sorted(valid_signals.items(), key=lambda x: x[1], reverse=True)
-                    
-                    # Enter new positions
-                    max_new_positions = self.config.max_positions - len(self.portfolio_state.positions)
-                    for ticker, signal_strength in sorted_signals[:max_new_positions]:
-                        if ticker not in self.portfolio_state.positions:
-                            
-                            # Calculate position size
-                            stock_price = current_prices[ticker]
-                            quantity = self.risk_manager.calculate_position_size(
-                                signal_strength, self.portfolio_state.portfolio_value, stock_price
-                            )
-                            
-                            # Apply risk limits
-                            quantity = self.risk_manager.apply_risk_limits(quantity, stock_price)
-                            
-                            if quantity > 0:
-                                success = self.execute_trade(
-                                    ticker, quantity, stock_price, 'buy', 
-                                    current_date, f"ML Signal: {signal_strength:.3f}"
-                                )
-                                
-                                if success:
-                                    logging.info(f"Opened position: {ticker} x {quantity} @ {stock_price}")
-                    
-                    last_rebalance = current_date
-                
-                # Record portfolio state
-                self.portfolio_history.append({
-                    'date': current_date,
-                    'portfolio_value': self.portfolio_state.portfolio_value,
-                    'cash': self.portfolio_state.cash,
-                    'positions': len(self.portfolio_state.positions),
-                    'drawdown': self.portfolio_state.drawdown
-                })
-                
-            except Exception as e:
-                logging.error(f"Error processing date {current_date}: {e}")
-                continue
-        
-        # Close all remaining positions at end
-        if self.portfolio_state.positions:
-            final_prices = {ticker: data[ticker].iloc[-1]['Close'] 
-                          for ticker in self.portfolio_state.positions.keys() 
-                          if ticker in data}
-            self._liquidate_all_positions(final_prices, end_date, "End of backtest")
-        
-        return self._generate_results()
+            return min(self.config.max_position_size, 
+                      self.portfolio.cash / self.config.max_positions)
     
-    def _liquidate_all_positions(self, prices: Dict[str, float], date: datetime, reason: str):
-        """Liquidate all positions"""
-        for ticker in list(self.portfolio_state.positions.keys()):
-            if ticker in prices:
-                position = self.portfolio_state.positions[ticker]
-                self.execute_trade(
-                    ticker, position['quantity'], prices[ticker],
-                    'sell', date, reason
-                )
+    def _calculate_portfolio_value(self, data: Dict[str, pd.DataFrame], date: datetime) -> float:
+        """Calculate total portfolio value"""
+        
+        total_value = self.portfolio.cash
+        
+        for ticker, position in self.portfolio.positions.items():
+            if ticker in data and date in data[ticker].index:
+                current_price = data[ticker].loc[date, 'Close']
+                position_value = position['quantity'] * current_price
+                total_value += position_value
+        
+        return total_value
     
-    def _generate_results(self) -> Dict:
-        """Generate comprehensive backtest results"""
+    def _prepare_results(self) -> Dict:
+        """Prepare backtest results"""
         
-        if not self.portfolio_history:
-            return {'error': 'No portfolio history generated'}
-        
-        # Convert to DataFrame
         portfolio_df = pd.DataFrame(self.portfolio_history)
         portfolio_df.set_index('date', inplace=True)
         
-        # Calculate returns
+        if len(portfolio_df) == 0:
+            return {'error': 'No portfolio data generated'}
+        
+        # Calculate performance metrics
         returns = PerformanceMetrics.calculate_returns(portfolio_df['portfolio_value'])
         
-        # Performance metrics
-        metrics = {
-            'total_return': (portfolio_df['portfolio_value'].iloc[-1] / self.config.initial_capital) - 1,
-            'annual_return': (portfolio_df['portfolio_value'].iloc[-1] / self.config.initial_capital) ** (252 / len(portfolio_df)) - 1,
-            'volatility': returns.std() * np.sqrt(252),
-            'sharpe_ratio': PerformanceMetrics.sharpe_ratio(returns, self.config.risk_free_rate),
-            'sortino_ratio': PerformanceMetrics.sortino_ratio(returns, self.config.risk_free_rate),
-            'calmar_ratio': PerformanceMetrics.calmar_ratio(returns, portfolio_df['portfolio_value']),
-            'max_drawdown': PerformanceMetrics.max_drawdown(portfolio_df['portfolio_value']),
-            'var_95': PerformanceMetrics.value_at_risk(returns, 0.95),
-            'cvar_95': PerformanceMetrics.conditional_var(returns, 0.95),
-            'win_rate': PerformanceMetrics.win_rate(self.trades),
-            'profit_factor': PerformanceMetrics.profit_factor(self.trades),
-            'avg_trade_duration': PerformanceMetrics.average_trade_duration(self.trades),
-            'total_trades': len(self.trades),
-            'final_portfolio_value': portfolio_df['portfolio_value'].iloc[-1]
-        }
-        
-        # Trade analysis
-        if self.trades:
-            trade_returns = [trade.return_pct for trade in self.trades]
-            trade_pnl = [trade.net_pnl for trade in self.trades]
-            
-            metrics.update({
-                'avg_trade_return': np.mean(trade_returns),
-                'avg_trade_pnl': np.mean(trade_pnl),
-                'best_trade': max(trade_pnl),
-                'worst_trade': min(trade_pnl),
-                'trade_return_std': np.std(trade_returns)
-            })
-        
-        return {
-            'metrics': metrics,
+        results = {
+            'portfolio_values': portfolio_df['portfolio_value'],
             'portfolio_history': portfolio_df,
             'trades': self.trades,
-            'returns': returns,
-            'config': self.config
+            'total_trades': len(self.trades),
+            'winning_trades': len([t for t in self.trades if t.net_pnl > 0]),
+            'losing_trades': len([t for t in self.trades if t.net_pnl < 0]),
+            'total_return': (portfolio_df['portfolio_value'].iloc[-1] / self.config.initial_capital) - 1,
+            'sharpe_ratio': PerformanceMetrics.sharpe_ratio(returns),
+            'sortino_ratio': PerformanceMetrics.sortino_ratio(returns),
+            'max_drawdown': PerformanceMetrics.max_drawdown(portfolio_df['portfolio_value']),
+            'calmar_ratio': PerformanceMetrics.calmar_ratio(portfolio_df['portfolio_value']),
+            'var_95': PerformanceMetrics.value_at_risk(returns),
+            'final_portfolio_value': portfolio_df['portfolio_value'].iloc[-1],
+            'total_pnl': sum(t.net_pnl for t in self.trades)
         }
+        
+        if results['total_trades'] > 0:
+            results['win_rate'] = results['winning_trades'] / results['total_trades']
+            results['avg_win'] = np.mean([t.net_pnl for t in self.trades if t.net_pnl > 0])
+            results['avg_loss'] = np.mean([t.net_pnl for t in self.trades if t.net_pnl < 0])
+            results['profit_factor'] = abs(results['avg_win'] / results['avg_loss']) if results['avg_loss'] != 0 else np.inf
+        
+        return results
+
+class EnhancedBacktestEngine(BacktestEngine):
+    """Enhanced backtesting engine with risk management"""
+    
+    def __init__(self, config: EnhancedBacktestConfig):
+        super().__init__(config)
+        self.config = config
+        self.risk_events = []
+        self.correlation_matrix = None
+        
+    def run_enhanced_backtest(self, strategy: MLStrategy, data: Dict[str, pd.DataFrame], 
+                            start_date: datetime, end_date: datetime) -> Dict:
+        """Run enhanced backtest with risk management"""
+        try:
+            # Run the base backtest
+            results = self.run_backtest(strategy, data, start_date, end_date)
+            
+            if 'error' in results:
+                return results
+            
+            # Add enhanced analytics
+            enhanced_results = self._add_enhanced_analytics(results, data)
+            enhanced_results['risk_events'] = self.risk_events
+            enhanced_results['config'] = self.config
+            
+            return enhanced_results
+            
+        except Exception as e:
+            return {'error': f'Enhanced backtest failed: {str(e)}'}
+    
+    def _add_enhanced_analytics(self, results: Dict, data: Dict[str, pd.DataFrame]) -> Dict:
+        """Add enhanced analytics to backtest results"""
+        enhanced_results = results.copy()
+        
+        try:
+            # Calculate additional risk metrics
+            portfolio_values = results.get('portfolio_values', pd.Series())
+            
+            if not portfolio_values.empty:
+                returns = portfolio_values.pct_change().dropna()
+                
+                # Enhanced metrics
+                enhanced_results['max_drawdown'] = self._calculate_max_drawdown(portfolio_values)
+                enhanced_results['var_95'] = np.percentile(returns, 5) if len(returns) > 0 else 0
+                enhanced_results['sharpe_ratio'] = PerformanceMetrics.sharpe_ratio(returns)
+                enhanced_results['sortino_ratio'] = self._calculate_sortino_ratio(returns)
+                enhanced_results['calmar_ratio'] = self._calculate_calmar_ratio(portfolio_values)
+                
+                # Risk-adjusted returns
+                annual_return = (portfolio_values.iloc[-1] / portfolio_values.iloc[0]) ** (252/len(portfolio_values)) - 1
+                enhanced_results['annual_return'] = annual_return
+                enhanced_results['volatility'] = returns.std() * np.sqrt(252)
+                
+        except Exception as e:
+            logging.warning(f"Enhanced analytics failed: {e}")
+        
+        return enhanced_results
+    
+    def _calculate_max_drawdown(self, portfolio_values: pd.Series) -> float:
+        """Calculate maximum drawdown"""
+        peak = portfolio_values.expanding().max()
+        drawdown = (portfolio_values - peak) / peak
+        return drawdown.min()
+    
+    def _calculate_sortino_ratio(self, returns: pd.Series, risk_free_rate: float = 0.06) -> float:
+        """Calculate Sortino ratio"""
+        excess_returns = returns - risk_free_rate / 252
+        negative_returns = excess_returns[excess_returns < 0]
+        
+        if len(negative_returns) == 0:
+            return np.inf
+        
+        downside_deviation = negative_returns.std()
+        if downside_deviation == 0:
+            return 0
+        
+        return excess_returns.mean() / downside_deviation * np.sqrt(252)
+    
+    def _calculate_calmar_ratio(self, portfolio_values: pd.Series) -> float:
+        """Calculate Calmar ratio"""
+        annual_return = (portfolio_values.iloc[-1] / portfolio_values.iloc[0]) ** (252/len(portfolio_values)) - 1
+        max_drawdown = abs(self._calculate_max_drawdown(portfolio_values))
+        
+        if max_drawdown == 0:
+            return np.inf
+        
+        return annual_return / max_drawdown
 
 class BacktestAnalyzer:
-    """Analyze and visualize backtest results"""
+    """Analyze and report backtest results"""
     
-    @staticmethod
-    def create_performance_report(results: Dict) -> str:
-        """Generate a comprehensive performance report"""
+    def __init__(self):
+        self.results = None
+    
+    def analyze_results(self, results: Dict) -> Dict:
+        """Analyze backtest results"""
         
-        metrics = results['metrics']
+        if 'error' in results:
+            return results
+        
+        analysis = {
+            'performance_summary': self._create_performance_summary(results),
+            'trade_analysis': self._analyze_trades(results.get('trades', [])),
+            'risk_analysis': self._analyze_risk(results),
+            'monthly_returns': self._calculate_monthly_returns(results)
+        }
+        
+        return analysis
+    
+    def _create_performance_summary(self, results: Dict) -> Dict:
+        """Create performance summary"""
+        
+        return {
+            'Total Return': f"{results.get('total_return', 0):.2%}",
+            'Sharpe Ratio': f"{results.get('sharpe_ratio', 0):.3f}",
+            'Max Drawdown': f"{results.get('max_drawdown', 0):.2%}",
+            'Win Rate': f"{results.get('win_rate', 0):.2%}",
+            'Total Trades': results.get('total_trades', 0),
+            'Profit Factor': f"{results.get('profit_factor', 0):.2f}"
+        }
+    
+    def _analyze_trades(self, trades: List[Trade]) -> Dict:
+        """Analyze individual trades"""
+        
+        if not trades:
+            return {'error': 'No trades to analyze'}
+        
+        returns = [t.return_pct for t in trades]
+        holding_periods = [t.holding_period for t in trades]
+        
+        return {
+            'total_trades': len(trades),
+            'avg_return': np.mean(returns),
+            'std_return': np.std(returns),
+            'avg_holding_period': np.mean(holding_periods),
+            'best_trade': max(returns),
+            'worst_trade': min(returns)
+        }
+    
+    def _analyze_risk(self, results: Dict) -> Dict:
+        """Analyze risk metrics"""
+        
+        return {
+            'max_drawdown': results.get('max_drawdown', 0),
+            'var_95': results.get('var_95', 0),
+            'sortino_ratio': results.get('sortino_ratio', 0),
+            'calmar_ratio': results.get('calmar_ratio', 0)
+        }
+    
+    def _calculate_monthly_returns(self, results: Dict) -> pd.Series:
+        """Calculate monthly returns"""
+        
+        portfolio_values = results.get('portfolio_values', pd.Series())
+        
+        if portfolio_values.empty:
+            return pd.Series()
+        
+        monthly_values = portfolio_values.resample('M').last()
+        monthly_returns = monthly_values.pct_change().dropna()
+        
+        return monthly_returns
+    
+    def create_performance_report(self, results: Dict) -> str:
+        """Create a comprehensive performance report"""
+        
+        if 'error' in results:
+            return f"Error in backtest: {results['error']}"
+        
+        analysis = self.analyze_results(results)
         
         report = f"""
 BACKTEST PERFORMANCE REPORT
 {'='*50}
 
-RETURN METRICS:
-Total Return: {metrics['total_return']:.2%}
-Annual Return: {metrics['annual_return']:.2%}
-Volatility: {metrics['volatility']:.2%}
-
-RISK METRICS:
-Sharpe Ratio: {metrics['sharpe_ratio']:.3f}
-Sortino Ratio: {metrics['sortino_ratio']:.3f}
-Calmar Ratio: {metrics['calmar_ratio']:.3f}
-Maximum Drawdown: {metrics['max_drawdown']:.2%}
-Value at Risk (95%): {metrics['var_95']:.2%}
-Conditional VaR (95%): {metrics['cvar_95']:.2%}
-
-TRADING METRICS:
-Total Trades: {metrics['total_trades']}
-Win Rate: {metrics['win_rate']:.2%}
-Profit Factor: {metrics['profit_factor']:.3f}
-Average Trade Duration: {metrics['avg_trade_duration']:.1f} days
-Average Trade Return: {metrics.get('avg_trade_return', 0):.2%}
-Best Trade: ₹{metrics.get('best_trade', 0):,.0f}
-Worst Trade: ₹{metrics.get('worst_trade', 0):,.0f}
-
-FINAL VALUES:
-Final Portfolio Value: ₹{metrics['final_portfolio_value']:,.0f}
+PERFORMANCE SUMMARY:
+{'-'*20}
 """
-        return report
-    
-    @staticmethod
-    def plot_performance(results: Dict, save_path: str = None):
-        """Create performance visualization plots"""
         
-        portfolio_df = results['portfolio_history']
-        metrics = results['metrics']
+        for key, value in analysis['performance_summary'].items():
+            report += f"{key}: {value}\n"
         
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-        
-        # Portfolio value over time
-        axes[0, 0].plot(portfolio_df.index, portfolio_df['portfolio_value'])
-        axes[0, 0].set_title('Portfolio Value Over Time')
-        axes[0, 0].set_ylabel('Portfolio Value (₹)')
-        axes[0, 0].grid(True)
-        
-        # Drawdown
-        peak = portfolio_df['portfolio_value'].cummax()
-        drawdown = (portfolio_df['portfolio_value'] - peak) / peak
-        axes[0, 1].fill_between(portfolio_df.index, drawdown, 0, alpha=0.3, color='red')
-        axes[0, 1].set_title('Drawdown')
-        axes[0, 1].set_ylabel('Drawdown %')
-        axes[0, 1].grid(True)
-        
-        # Returns distribution
-        if 'returns' in results:
-            returns = results['returns']
-            axes[1, 0].hist(returns, bins=50, alpha=0.7)
-            axes[1, 0].axvline(returns.mean(), color='red', linestyle='--', label='Mean')
-            axes[1, 0].set_title('Daily Returns Distribution')
-            axes[1, 0].set_xlabel('Daily Return')
-            axes[1, 0].legend()
-            axes[1, 0].grid(True)
-        
-        # Rolling metrics
-        if len(portfolio_df) > 60:
-            rolling_sharpe = []
-            rolling_window = 60
-            
-            for i in range(rolling_window, len(portfolio_df)):
-                window_returns = portfolio_df['portfolio_value'].iloc[i-rolling_window:i].pct_change().dropna()
-                if len(window_returns) > 0:
-                    sharpe = PerformanceMetrics.sharpe_ratio(window_returns)
-                    rolling_sharpe.append(sharpe)
-                else:
-                    rolling_sharpe.append(0)
-            
-            rolling_dates = portfolio_df.index[rolling_window:]
-            axes[1, 1].plot(rolling_dates, rolling_sharpe)
-            axes[1, 1].set_title('Rolling 60-Day Sharpe Ratio')
-            axes[1, 1].set_ylabel('Sharpe Ratio')
-            axes[1, 1].grid(True)
-        
-        plt.tight_layout()
-        
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        
-        return fig
+        report += f"""
+TRADE ANALYSIS:
+{'-'*20}
+Total Trades: {analysis['trade_analysis'].get('total_trades', 0)}
+Average Return: {analysis['trade_analysis'].get('avg_return', 0):.2%}
+Best Trade: {analysis['trade_analysis'].get('best_trade', 0):.2%}
+Worst Trade: {analysis['trade_analysis'].get('worst_trade', 0):.2%}
+Average Holding Period: {analysis['trade_analysis'].get('avg_holding_period', 0):.1f} days
 
-# Database integration for storing backtest results
+RISK ANALYSIS:
+{'-'*20}
+Maximum Drawdown: {analysis['risk_analysis'].get('max_drawdown', 0):.2%}
+Value at Risk (95%): {analysis['risk_analysis'].get('var_95', 0):.2%}
+Sortino Ratio: {analysis['risk_analysis'].get('sortino_ratio', 0):.3f}
+Calmar Ratio: {analysis['risk_analysis'].get('calmar_ratio', 0):.3f}
+
+{'='*50}
+"""
+        
+        return report
+
 class BacktestDB:
-    """Database operations for backtest results"""
+    """Database for storing backtest results"""
     
-    def __init__(self, db_path: str = "data/backtests.db"):
+    def __init__(self, db_path: str = 'data/backtests.db'):
         self.db_path = db_path
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        self.init_db()
+        self._ensure_db_exists()
     
-    def init_db(self):
-        """Initialize database tables"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+    def _ensure_db_exists(self):
+        """Ensure database and tables exist"""
+        
+        try:
+            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+            
+            conn = sqlite3.connect(self.db_path)
+            
+            conn.execute('''
                 CREATE TABLE IF NOT EXISTS backtests (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
-                    start_date TEXT,
-                    end_date TEXT,
-                    initial_capital REAL,
-                    final_value REAL,
-                    total_return REAL,
-                    sharpe_ratio REAL,
-                    max_drawdown REAL,
-                    total_trades INTEGER,
-                    win_rate REAL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    config_json TEXT,
-                    results_json TEXT
+                    config TEXT,
+                    results TEXT,
+                    performance_metrics TEXT
                 )
-            """)
+            ''')
             
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS trades (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    backtest_id INTEGER,
-                    ticker TEXT,
-                    entry_date TEXT,
-                    exit_date TEXT,
-                    entry_price REAL,
-                    exit_price REAL,
-                    quantity INTEGER,
-                    net_pnl REAL,
-                    return_pct REAL,
-                    holding_period INTEGER,
-                    FOREIGN KEY (backtest_id) REFERENCES backtests (id)
-                )
-            """)
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            logging.error(f"Database initialization failed: {e}")
     
     def save_backtest(self, name: str, results: Dict) -> int:
         """Save backtest results to database"""
         
-        metrics = results['metrics']
-        config = results['config']
-        
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
-                INSERT INTO backtests 
-                (name, initial_capital, final_value, total_return, sharpe_ratio, 
-                 max_drawdown, total_trades, win_rate, config_json, results_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                name,
-                config.initial_capital,
-                metrics['final_portfolio_value'],
-                metrics['total_return'],
-                metrics['sharpe_ratio'],
-                metrics['max_drawdown'],
-                metrics['total_trades'],
-                metrics['win_rate'],
-                pickle.dumps(config).hex(),
-                pickle.dumps(results).hex()
-            ))
+        try:
+            conn = sqlite3.connect(self.db_path)
+            
+            cursor = conn.execute('''
+                INSERT INTO backtests (name, results)
+                VALUES (?, ?)
+            ''', (name, pickle.dumps(results)))
             
             backtest_id = cursor.lastrowid
-            
-            # Save trades
-            for trade in results['trades']:
-                conn.execute("""
-                    INSERT INTO trades 
-                    (backtest_id, ticker, entry_date, exit_date, entry_price, 
-                     exit_price, quantity, net_pnl, return_pct, holding_period)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    backtest_id, trade.ticker, trade.entry_date.isoformat(),
-                    trade.exit_date.isoformat(), trade.entry_price, trade.exit_price,
-                    trade.quantity, trade.net_pnl, trade.return_pct, trade.holding_period
-                ))
+            conn.commit()
+            conn.close()
             
             return backtest_id
+            
+        except Exception as e:
+            logging.error(f"Failed to save backtest: {e}")
+            return -1
     
     def load_backtest(self, backtest_id: int) -> Dict:
         """Load backtest results from database"""
         
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("""
-                SELECT results_json FROM backtests WHERE id = ?
-            """, (backtest_id,))
+        try:
+            conn = sqlite3.connect(self.db_path)
+            
+            cursor = conn.execute('''
+                SELECT results FROM backtests WHERE id = ?
+            ''', (backtest_id,))
             
             row = cursor.fetchone()
-            if row:
-                return pickle.loads(bytes.fromhex(row[0]))
+            conn.close()
             
-        return None
+            if row:
+                return pickle.loads(row[0])
+            else:
+                return {'error': 'Backtest not found'}
+                
+        except Exception as e:
+            logging.error(f"Failed to load backtest: {e}")
+            return {'error': f'Failed to load backtest: {str(e)}'}
     
     def list_backtests(self) -> pd.DataFrame:
-        """List all saved backtests"""
+        """List all backtests"""
         
-        with sqlite3.connect(self.db_path) as conn:
-            df = pd.read_sql("""
-                SELECT id, name, initial_capital, final_value, total_return, 
-                       sharpe_ratio, max_drawdown, total_trades, win_rate, created_at
-                FROM backtests
-                ORDER BY created_at DESC
-            """, conn)
+        try:
+            conn = sqlite3.connect(self.db_path)
             
-        return df
+            df = pd.read_sql_query('''
+                SELECT id, name, created_at FROM backtests
+                ORDER BY created_at DESC
+            ''', conn)
+            
+            conn.close()
+            return df
+            
+        except Exception as e:
+            logging.error(f"Failed to list backtests: {e}")
+            return pd.DataFrame()
+
+# Export all classes
+__all__ = [
+    'BacktestConfig', 'EnhancedBacktestConfig', 'Trade', 'PortfolioState', 
+    'PerformanceMetrics', 'Strategy', 'MLStrategy', 'BacktestEngine', 
+    'EnhancedBacktestEngine', 'BacktestAnalyzer', 'BacktestDB'
+]
 
 # Example usage and testing
 if __name__ == "__main__":
-    # Example of how to use the backtesting framework
+    print("Enhanced Backtesting Framework")
+    print("="*50)
     
-    # Configuration
-    config = BacktestConfig(
-        initial_capital=1000000,
-        transaction_cost_pct=0.001,
-        slippage_pct=0.0005,
-        max_positions=10,
-        rebalance_frequency='monthly'
-    )
-    
-    # Mock data for testing
+    # Test with mock data
     def create_mock_data():
-        dates = pd.date_range('2020-01-01', '2023-12-31', freq='D')
+        """Create mock stock data for testing"""
+        dates = pd.date_range('2021-01-01', '2022-12-31', freq='D')
         tickers = ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS']
         
         data = {}
+        
         for ticker in tickers:
-            np.random.seed(hash(ticker) % 2**32)  # Deterministic but different for each ticker
-            prices = 100 * np.exp(np.cumsum(np.random.normal(0.0005, 0.02, len(dates))))
+            # Generate realistic stock price data
+            np.random.seed(hash(ticker) % 1000)
+            returns = np.random.normal(0.0005, 0.02, len(dates))
+            prices = 100 * np.exp(np.cumsum(returns))
             
             df = pd.DataFrame({
                 'Open': prices * np.random.uniform(0.99, 1.01, len(dates)),
@@ -907,6 +889,7 @@ if __name__ == "__main__":
     test_data = create_mock_data()
     
     # Initialize engine and strategy
+    config = BacktestConfig()
     engine = BacktestEngine(config)
     strategy = MockStrategy()
     
