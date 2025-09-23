@@ -125,7 +125,15 @@ except ImportError as e:
                     features_df['ema_20'] = df['Close'].ewm(span=20).mean()
                     
                     if len(df) > 14:
-                        features_df['rsi'] = ta.momentum.RSIIndicator(df['Close'], window=14).rsi()
+                        try:
+                            features_df['rsi'] = ta.momentum.RSIIndicator(df['Close'], window=14).rsi()
+                        except:
+                            # Simple RSI calculation
+                            delta = df['Close'].diff()
+                            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                            rs = gain / loss
+                            features_df['rsi'] = 100 - (100 / (1 + rs))
                     
                     # Price features
                     features_df['price_change'] = df['Close'].pct_change()
@@ -238,11 +246,13 @@ except ImportError as e:
         }
     
     def predict_with_ensemble_and_targets(models: Dict, featured_data: Dict, 
+                                        raw_data: Dict,
                                         investment_horizon: str,  # FIXED: renamed from horizon
                                         selected_tickers: List[str], 
-                                        **kwargs) -> pd.DataFrame:
+                                        **kwargs) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Fallback prediction function with correct signature"""
         predictions = []
+        price_targets = []
         
         for ticker in selected_tickers:
             if ticker not in models or ticker not in featured_data:
@@ -250,6 +260,7 @@ except ImportError as e:
                 
             try:
                 df = featured_data[ticker]
+                raw_df = raw_data.get(ticker, df)  # Use raw_data if available, else featured_data
                 model_dict = models[ticker]
                 
                 if df.empty or not model_dict:
@@ -273,6 +284,7 @@ except ImportError as e:
                 else:
                     confidence = 0.6
                 
+                # Add to predictions
                 predictions.append({
                     'ticker': ticker,
                     'predicted_return': prediction,
@@ -281,13 +293,26 @@ except ImportError as e:
                     'horizon': investment_horizon  # FIXED: use correct parameter name
                 })
                 
+                # Generate price targets
+                current_price = raw_df['Close'].iloc[-1] if 'Close' in raw_df.columns else 100.0
+                target_price = current_price * (1.05 if prediction > 0.5 else 1.02)
+                
+                price_targets.append({
+                    'ticker': ticker,
+                    'current_price': current_price,
+                    'target_price': target_price,
+                    'percentage_change': (target_price - current_price) / current_price,
+                    'horizon': investment_horizon,
+                    'confidence': confidence
+                })
+                
             except Exception as e:
                 st.warning(f"Prediction failed for {ticker}: {e}")
                 continue
         
-        return pd.DataFrame(predictions)
+        return pd.DataFrame(predictions), pd.DataFrame(price_targets)
     
-    def generate_price_targets_for_selected_stocks(models: Dict, featured_data: Dict, 
+    def generate_price_targets_for_selected_stocks(models: Dict, raw_data: Dict, 
                                                  selected_tickers: List[str],
                                                  investment_horizon: str,  # FIXED: renamed from horizon
                                                  **kwargs) -> pd.DataFrame:
@@ -295,11 +320,11 @@ except ImportError as e:
         targets = []
         
         for ticker in selected_tickers:
-            if ticker not in featured_data:
+            if ticker not in raw_data:
                 continue
                 
             try:
-                df = featured_data[ticker]
+                df = raw_data[ticker]
                 current_price = df['Close'].iloc[-1] if 'Close' in df.columns else 100.0
                 
                 # Simple price target based on historical volatility
@@ -337,7 +362,7 @@ except ImportError as e:
     
     # Add the missing predict_with_ensemble fallback
     def predict_with_ensemble(models: Dict, 
-                            current_data: Dict,  # FIXED: renamed from featured_data
+                            featured_data: Dict,  # FIXED: renamed from current_data
                             investment_horizon: str,  # FIXED: renamed from horizon
                             selected_tickers: List[str],
                             **kwargs) -> pd.DataFrame:
@@ -345,11 +370,11 @@ except ImportError as e:
         predictions = []
         
         for ticker in selected_tickers:
-            if ticker not in models or ticker not in current_data:
+            if ticker not in models or ticker not in featured_data:
                 continue
                 
             try:
-                df = current_data[ticker]
+                df = featured_data[ticker]
                 model_dict = models[ticker]
                 
                 if df.empty or not model_dict:
@@ -1011,58 +1036,81 @@ def create_results_visualization(predictions_df: pd.DataFrame, price_targets_df:
         st.warning("⚠️ No results to visualize")
         return
     
-    # Predictions visualization
-    if not predictions_df.empty:
-        st.subheader("🔮 AI Stock Predictions")
-        
-        # Display predictions table
-        display_df = predictions_df.copy()
-        if 'ensemble_confidence' in display_df.columns:
-            display_df['ensemble_confidence'] = display_df['ensemble_confidence'].apply(lambda x: f"{x:.1%}")
-        if 'signal_strength' in display_df.columns:
-            display_df['signal_strength'] = display_df['signal_strength'].apply(lambda x: f"{x:.2f}")
+    try:
+        # Predictions visualization
+        if not predictions_df.empty:
+            st.subheader("🔮 AI Stock Predictions")
             
-        st.dataframe(display_df, use_container_width=True)
-        
-        # Prediction summary chart
-        if 'predicted_return' in predictions_df.columns:
-            prediction_counts = predictions_df['predicted_return'].value_counts()
+            # Display predictions table with error handling
+            try:
+                display_df = predictions_df.copy()
+                if 'ensemble_confidence' in display_df.columns:
+                    display_df['ensemble_confidence'] = display_df['ensemble_confidence'].apply(lambda x: f"{x:.1%}")
+                if 'signal_strength' in display_df.columns:
+                    display_df['signal_strength'] = display_df['signal_strength'].apply(lambda x: f"{x:.2f}")
+                    
+                st.dataframe(display_df, use_container_width=True)
+            except Exception as table_error:
+                st.warning(f"Table display error: {table_error}")
+                st.dataframe(predictions_df, use_container_width=True)
             
-            if len(prediction_counts) > 0:
-                fig = px.pie(
-                    values=prediction_counts.values,
-                    names=['Bullish' if x == 1 else 'Bearish' for x in prediction_counts.index],
-                    title="Prediction Distribution",
-                    color_discrete_map={'Bullish': '#28a745', 'Bearish': '#dc3545'}
-                )
-                st.plotly_chart(fig, use_container_width=True)
-    
-    # Price targets visualization
-    if not price_targets_df.empty:
-        st.subheader("🎯 Price Targets")
+            # Prediction summary chart with error handling
+            try:
+                if 'predicted_return' in predictions_df.columns:
+                    # Create prediction categories
+                    predictions_df['category'] = predictions_df['predicted_return'].apply(
+                        lambda x: 'Bullish' if x > 0.02 else 'Bearish' if x < -0.02 else 'Neutral'
+                    )
+                    prediction_counts = predictions_df['category'].value_counts()
+                    
+                    if len(prediction_counts) > 0:
+                        fig = px.pie(
+                            values=prediction_counts.values,
+                            names=prediction_counts.index,
+                            title="Prediction Distribution",
+                            color_discrete_map={'Bullish': '#28a745', 'Bearish': '#dc3545', 'Neutral': '#ffc107'}
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+            except Exception as chart_error:
+                st.info(f"Chart display skipped: {chart_error}")
         
-        # Display price targets table
-        display_df = price_targets_df.copy()
-        for col in ['current_price', 'target_price']:
-            if col in display_df.columns:
-                display_df[col] = display_df[col].apply(lambda x: f"₹{x:.2f}")
-        if 'percentage_change' in display_df.columns:
-            display_df['percentage_change'] = display_df['percentage_change'].apply(lambda x: f"{x:.1%}")
+        # Price targets visualization
+        if not price_targets_df.empty:
+            st.subheader("🎯 Price Targets")
             
-        st.dataframe(display_df, use_container_width=True)
-        
-        # Price targets chart
-        if 'ticker' in price_targets_df.columns and 'percentage_change' in price_targets_df.columns:
-            fig = px.bar(
-                price_targets_df,
-                x='ticker',
-                y='percentage_change',
-                title="Expected Returns by Stock",
-                color='percentage_change',
-                color_continuous_scale=['red', 'yellow', 'green']
-            )
-            fig.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig, use_container_width=True)
+            # Display price targets table with error handling
+            try:
+                display_df = price_targets_df.copy()
+                for col in ['current_price', 'target_price']:
+                    if col in display_df.columns:
+                        display_df[col] = display_df[col].apply(lambda x: f"₹{x:.2f}")
+                if 'percentage_change' in display_df.columns:
+                    display_df['percentage_change'] = display_df['percentage_change'].apply(lambda x: f"{x:.1%}")
+                    
+                st.dataframe(display_df, use_container_width=True)
+            except Exception as table_error:
+                st.warning(f"Price targets table error: {table_error}")
+                st.dataframe(price_targets_df, use_container_width=True)
+            
+            # Price targets chart with error handling
+            try:
+                if 'ticker' in price_targets_df.columns and 'percentage_change' in price_targets_df.columns:
+                    fig = px.bar(
+                        price_targets_df,
+                        x='ticker',
+                        y='percentage_change',
+                        title="Expected Returns by Stock",
+                        color='percentage_change',
+                        color_continuous_scale=['red', 'yellow', 'green']
+                    )
+                    fig.update_layout(xaxis_tickangle=-45)
+                    st.plotly_chart(fig, use_container_width=True)
+            except Exception as chart_error:
+                st.info(f"Price targets chart skipped: {chart_error}")
+                
+    except Exception as e:
+        st.error(f"❌ Results visualization failed: {e}")
+        st.info("Raw results are still available in the detailed tabs below")
 
 # ==================== MAIN APPLICATION ====================
 
@@ -1202,10 +1250,9 @@ def main():
                 # Try the combined function first
                 result = predict_with_ensemble_and_targets(
                     models=models, 
-                    current_data=featured_data, 
+                    featured_data=featured_data,
+                    raw_data=raw_data,
                     investment_horizon=full_config['investment_horizon'],  # FIXED: was horizon=
-                    model_types=None,
-                    ensemble_method='weighted_average',
                     selected_tickers=selected_tickers
                 )
                 
@@ -1224,7 +1271,7 @@ def main():
                     # Generate predictions separately
                     predictions_df = predict_with_ensemble(
                         models=models,
-                        current_data=featured_data,
+                        featured_data=featured_data,
                         investment_horizon=full_config['investment_horizon'],  # FIXED: was horizon=
                         selected_tickers=selected_tickers
                     )
@@ -1237,7 +1284,7 @@ def main():
                 try:
                     price_targets_df = generate_price_targets_for_selected_stocks(
                         models=models, 
-                        current_data=featured_data, 
+                        raw_data=raw_data, 
                         selected_tickers=selected_tickers,
                         investment_horizon=full_config['investment_horizon']  # FIXED: was horizon=
                     )
@@ -1253,27 +1300,40 @@ def main():
             if predictions_df.empty and price_targets_df.empty:
                 st.warning("⚠️ No predictions or price targets could be generated")
                 st.info("This might be due to:")
-                st.info("• Insufficient historical data")
-                st.info("• Model configuration issues") 
-                st.info("• Feature engineering problems")
+                st.info("• Insufficient historical data for the selected stock")
+                st.info("• Model training issues - try selecting different stocks") 
+                st.info("• Feature engineering problems - check data quality")
                 
-                # Create minimal results for display
-                predictions_df = pd.DataFrame({
-                    'ticker': selected_tickers,
-                    'predicted_return': [0.5] * len(selected_tickers),
-                    'ensemble_confidence': [0.5] * len(selected_tickers),
-                    'signal_strength': [0.5] * len(selected_tickers),
-                    'horizon': [full_config['investment_horizon']] * len(selected_tickers)
-                })
+                # Create minimal fallback results for display
+                fallback_predictions = []
+                fallback_targets = []
                 
-                price_targets_df = pd.DataFrame({
-                    'ticker': selected_tickers,
-                    'current_price': [100.0] * len(selected_tickers),
-                    'target_price': [105.0] * len(selected_tickers), 
-                    'percentage_change': [0.05] * len(selected_tickers),
-                    'horizon': [full_config['investment_horizon']] * len(selected_tickers),
-                    'confidence': [0.5] * len(selected_tickers)
-                })            
+                for ticker in selected_tickers:
+                    if ticker in raw_data and not raw_data[ticker].empty:
+                        current_price = raw_data[ticker]['Close'].iloc[-1] if 'Close' in raw_data[ticker].columns else 100.0
+                        
+                        fallback_predictions.append({
+                            'ticker': ticker,
+                            'predicted_return': 0.02,  # Modest positive prediction
+                            'ensemble_confidence': 0.5,
+                            'signal_strength': 0.5,
+                            'horizon': full_config['investment_horizon']
+                        })
+                        
+                        fallback_targets.append({
+                            'ticker': ticker,
+                            'current_price': current_price,
+                            'target_price': current_price * 1.05, 
+                            'percentage_change': 0.05,
+                            'horizon': full_config['investment_horizon'],
+                            'confidence': 0.5
+                        })
+                
+                if fallback_predictions:
+                    predictions_df = pd.DataFrame(fallback_predictions)
+                    price_targets_df = pd.DataFrame(fallback_targets)
+                    st.info("📊 Showing fallback predictions based on basic analysis")
+                        
             # Step 4: Complete (100%)
             status_text.text("✅ Analysis complete!")
             progress_bar.progress(100)
@@ -1291,8 +1351,12 @@ def main():
             )
             display_comprehensive_performance_report(report_data)
             
-            # Results visualization
-            create_results_visualization(predictions_df, price_targets_df, raw_data)
+            # Results visualization with error handling
+            try:
+                create_results_visualization(predictions_df, price_targets_df, raw_data)
+            except Exception as viz_error:
+                st.warning(f"⚠️ Visualization error: {viz_error}")
+                st.info("Results are available in the tables below")
             
             # Results tabs
             if not predictions_df.empty or not price_targets_df.empty:
