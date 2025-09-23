@@ -78,7 +78,7 @@ class FixedModuleLoader:
         try:
             # Try to import the actual functions from your existing model module
             from utils.model import (
-                train_models_for_selected_stocks, 
+                train_models_enhanced_parallel, 
                 predict_with_ensemble_and_targets,
                 save_models_optimized, 
                 load_models_optimized
@@ -86,7 +86,7 @@ class FixedModuleLoader:
             self.modules_status['model'] = True
             st.success("✅ Model module loaded successfully")
             return {
-                'train_models_for_selected_stocks': train_models_for_selected_stocks,
+                'train_models_enhanced_parallel': train_models_enhanced_parallel,
                 'predict_with_ensemble_and_targets': predict_with_ensemble_and_targets,
                 'save_models_optimized': save_models_optimized,
                 'load_models_optimized': load_models_optimized
@@ -222,7 +222,7 @@ class FixedModuleLoader:
     def _create_fallback_model_functions(self):
         """Create fallback model functions matching original signatures"""
         
-        def train_models_for_selected_stocks(featured_data: Dict, selected_tickers: List[str], 
+        def train_models_enhanced_parallel(featured_data: Dict, selected_tickers: List[str], 
                                            investment_horizon: str = 'next_month',
                                            model_types: List[str] = None, **kwargs):
             """Fallback model training"""
@@ -300,7 +300,7 @@ class FixedModuleLoader:
                 return {}
         
         return {
-            'train_models_for_selected_stocks': train_models_for_selected_stocks,
+            'train_models_enhanced_parallel': train_models_enhanced_parallel,
             'predict_with_ensemble_and_targets': predict_with_ensemble_and_targets,
             'save_models_optimized': save_models_optimized,
             'load_models_optimized': load_models_optimized
@@ -476,7 +476,7 @@ risk_components = module_loader.load_risk_management()
 backtest_components = module_loader.load_backtesting()
 
 # Extract functions
-train_models_for_selected_stocks = model_functions['train_models_for_selected_stocks']
+train_models_enhanced_parallel = model_functions['train_models_enhanced_parallel']
 predict_with_ensemble_and_targets = model_functions['predict_with_ensemble_and_targets']
 save_models_optimized = model_functions['save_models_optimized']
 load_models_optimized = model_functions['load_models_optimized']
@@ -1629,7 +1629,7 @@ def main():
                 status_text.text("🤖 Training ML models...")
                 progress_bar.progress(60)
                 
-                models = train_models_for_selected_stocks(
+                models = train_models_enhanced_parallel(
                     featured_data=featured_data,
                     selected_tickers=selected_tickers,
                     investment_horizon=full_config['investment_horizon'],
