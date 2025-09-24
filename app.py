@@ -627,123 +627,959 @@ class EnhancedPriceForecaster:
 # ==================== COMPREHENSIVE INTERFACE COMPONENTS ====================
 
 def create_enhanced_stock_selection_interface() -> List[str]:
-    """Create enhanced stock selection interface with advanced features"""
+    """Create comprehensive stock selection interface with extensive categories"""
     with st.sidebar:
-        st.header("📊 Advanced Stock Selection")
+        st.header("📊 Advanced Stock Selection Hub")
         
-        # Enhanced popular Indian stocks with sectors
+        # COMPREHENSIVE STOCK CATEGORIES - INDIAN MARKET
         stock_categories = {
-            "Large Cap - Banking": ["HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS", "AXISBANK.NS"],
-            "Large Cap - IT": ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS"],
-            "Large Cap - Consumer": ["HINDUNILVR.NS", "NESTLEIND.NS", "BRITANNIA.NS", "DABUR.NS", "GODREJCP.NS"],
-            "Large Cap - Industrial": ["RELIANCE.NS", "LT.NS", "ULTRAcemco.NS", "GRASIM.NS", "TATASTEEL.NS"],
-            "Large Cap - Auto": ["MARUTI.NS", "HYUNDAI.NS", "M&M.NS", "TATAMOTORS.NS", "BAJAJ-AUTO.NS"],
-            "Mid Cap - Growth": ["MCDOWELL-N.NS", "PIDILITIND.NS", "VOLTAS.NS", "CROMPTON.NS", "DIXON.NS"]
+            # ==================== FINANCIAL SERVICES ====================
+            "🏦 Banking - Large Cap": [
+                "HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS", "AXISBANK.NS",
+                "INDUSINDBK.NS", "BANDHANBNK.NS", "IDFCFIRSTB.NS", "FEDERALBNK.NS", "PNB.NS"
+            ],
+            
+            "🏦 Banking - Mid & Small Cap": [
+                "RBLBANK.NS", "SOUTHBANK.NS", "CITYUNIONBK.NS", "DCBBANK.NS", "KARURBANK.NS",
+                "TMVIL.NS", "SURYODAY.NS", "EQUITASBNK.NS", "UJJIVANSFB.NS", "AUBANK.NS"
+            ],
+            
+            "💰 NBFCs & Financial Services": [
+                "BAJFINANCE.NS", "BAJAJFINSV.NS", "HDFCAMC.NS", "MUTHOOTFIN.NS", "MANAPPURAM.NS",
+                "CHOLAFIN.NS", "PFC.NS", "RECLTD.NS", "LICHSGFIN.NS", "IIFL.NS"
+            ],
+            
+            "📈 Insurance": [
+                "HDFCLIFE.NS", "ICICIPRULI.NS", "SBILIFE.NS", "MAXLIFEINS.NS", "LICI.NS",
+                "ICICIGI.NS", "HDFCERGO.NS", "NIACL.NS", "UIICL.NS", "ORIENTALINS.NS"
+            ],
+            
+            "🏛️ Capital Markets": [
+                "HDFCAMC.NS", "NIFTYBEES.NS", "CDSL.NS", "BSE.NS", "MCX.NS",
+                "ANGELONE.NS", "MOTILALOFS.NS", "EDELWEISS.NS", "IIFLSEC.NS", "SHAREKHAN.NS"
+            ],
+            
+            # ==================== TECHNOLOGY ====================
+            "💻 IT Services - Large Cap": [
+                "TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS",
+                "LTI.NS", "MINDTREE.NS", "MPHASIS.NS", "PERSISTENT.NS", "LTTS.NS"
+            ],
+            
+            "💻 IT Services - Mid Cap": [
+                "COFORGE.NS", "SONATSOFTW.NS", "CYIENT.NS", "HEXAWARE.NS", "KPITTECH.NS",
+                "INTELLECT.NS", "RAMCOCEM.NS", "NIITTECH.NS", "ECLERX.NS", "ZENSAR.NS"
+            ],
+            
+            "📱 Software Products": [
+                "TATAELXSI.NS", "DATAPATTNS.NS", "NEWGEN.NS", "SUBEXLTD.NS", "QUICKHEAL.NS",
+                "SAKSOFT.NS", "MASTEK.NS", "MINDACORP.NS", "NETWEB.NS", "RATEGAIN.NS"
+            ],
+            
+            "🌐 Telecom & Internet": [
+                "BHARTIARTL.NS", "RJIO.NS", "VODAIDEA.NS", "TTML.NS", "RAILTEL.NS",
+                "GTLINFRA.NS", "RCOM.NS", "TATACOMM.NS", "MAHANAGAR.NS", "TEJAS.NS"
+            ],
+            
+            # ==================== CONSUMER SECTORS ====================
+            "🛍️ FMCG - Large Cap": [
+                "HINDUNILVR.NS", "NESTLEIND.NS", "BRITANNIA.NS", "DABUR.NS", "GODREJCP.NS",
+                "COLPAL.NS", "MARICO.NS", "EMAMILTD.NS", "VBL.NS", "TATACONSUM.NS"
+            ],
+            
+            "🛍️ FMCG - Mid Cap": [
+                "RELAXO.NS", "VGUARD.NS", "BAJAJCON.NS", "GILLETTE.NS", "HONASA.NS",
+                "PRATAAP.NS", "JYOTHYLAB.NS", "RADICO.NS", "CCL.NS", "BAJAJHIND.NS"
+            ],
+            
+            "🏠 Consumer Durables": [
+                "WHIRLPOOL.NS", "VOLTAS.NS", "BLUESTAR.NS", "CROMPTON.NS", "HAVELLS.NS",
+                "ORIENTELEC.NS", "AMBER.NS", "DIXON.NS", "RAJESHEXPO.NS", "TTK.NS"
+            ],
+            
+            "👗 Textiles & Apparel": [
+                "ADITIABIRLA.NS", "WELCORP.NS", "VARDHMAN.NS", "ARVIND.NS", "RAYMOND.NS",
+                "SPANDANA.NS", "TRIDENT.NS", "WELSPUN.NS", "INDHOTEL.NS", "KPR.NS"
+            ],
+            
+            "🍕 Food & Beverages": [
+                "JUBLFOOD.NS", "DEVYANI.NS", "WESTLIFE.NS", "SAPPHIRE.NS", "ZOMATO.NS",
+                "SWIGGY.NS", "VARUN.NS", "USLIND.NS", "UFLEX.NS", "BALRAMCHIN.NS"
+            ],
+            
+            # ==================== HEALTHCARE & PHARMA ====================
+            "💊 Pharmaceuticals - Large Cap": [
+                "SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS", "DIVISLAB.NS", "LUPIN.NS",
+                "BIOCON.NS", "AUROPHARM.NS", "CADILAHC.NS", "TORNTPHARM.NS", "AUROPHARMA.NS"
+            ],
+            
+            "💊 Pharmaceuticals - Mid Cap": [
+                "ALKEM.NS", "GLENMARK.NS", "LALPATHLAB.NS", "METROPOLIS.NS", "PFIZER.NS",
+                "ABBOTINDIA.NS", "SANOFI.NS", "GLAXO.NS", "NOVARTIS.NS", "MERCK.NS"
+            ],
+            
+            "🏥 Hospitals & Diagnostics": [
+                "APOLLOHOSP.NS", "FORTIS.NS", "MAXHEALTHC.NS", "NARAYANHRT.NS", "RHIM.NS",
+                "LALPATHLAB.NS", "METROPOLIS.NS", "THYROCARE.NS", "HESTERBIO.NS", "ISHAN.NS"
+            ],
+            
+            "🧬 Biotechnology": [
+                "BIOCON.NS", "BIOCORP.NS", "SYNGENE.NS", "SEQUENT.NS", "ASTER.NS",
+                "KRSNAA.NS", "VIJAYA.NS", "STRIDES.NS", "GRANULES.NS", "REDDY.NS"
+            ],
+            
+            # ==================== INDUSTRIAL & MANUFACTURING ====================
+            "🏭 Engineering - Large Cap": [
+                "LT.NS", "SIEMENS.NS", "ABB.NS", "BHEL.NS", "CUMMINSIND.NS",
+                "THERMAX.NS", "KECL.NS", "POWERGRID.NS", "SAIL.NS", "GAIL.NS"
+            ],
+            
+            "🏭 Engineering - Mid Cap": [
+                "CARBORUNIV.NS", "SCHAEFFLER.NS", "TIMKEN.NS", "SKCIL.NS", "GRINDWELL.NS",
+                "IFBIND.NS", "RATNAMANI.NS", "APCOTEXIND.NS", "SKFINDIA.NS", "AKZOINDIA.NS"
+            ],
+            
+            "⚡ Power & Utilities": [
+                "POWERGRID.NS", "NTPC.NS", "NHPC.NS", "SJVN.NS", "TATAPOWER.NS",
+                "ADANIGR.NS", "ADANIGREEN.NS", "SUZLON.NS", "RPOWER.NS", "TORNTPOWER.NS"
+            ],
+            
+            "🏗️ Infrastructure": [
+                "LTTS.NS", "HCC.NS", "IRCON.NS", "RVNL.NS", "NBCC.NS",
+                "GMRINFRA.NS", "GICRE.NS", "CONCOR.NS", "ADANIPORTS.NS", "JSWSTEEL.NS"
+            ],
+            
+            # ==================== MATERIALS & COMMODITIES ====================
+            "🏗️ Cement": [
+                "ULTRACEMCO.NS", "GRASIM.NS", "SHREECEM.NS", "AMBUJACEM.NS", "ACC.NS",
+                "DALMIACONT.NS", "JKCEMENT.NS", "RAMCOCEM.NS", "HEIDELBERG.NS", "JK.NS"
+            ],
+            
+            "⚙️ Steel & Metals": [
+                "TATASTEEL.NS", "JSWSTEEL.NS", "SAIL.NS", "JINDALSTEL.NS", "NMDC.NS",
+                "VEDL.NS", "HINDALCO.NS", "NALCO.NS", "RATNAMANI.NS", "MOIL.NS"
+            ],
+            
+            "🧪 Chemicals": [
+                "PIDILITIND.NS", "ASIANPAINT.NS", "BERGER.NS", "AKZOINDIA.NS", "KANSAINER.NS",
+                "BALRAMCHIN.NS", "TATACHEM.NS", "GHCL.NS", "ALKYLAMINE.NS", "DEEPAKFERT.NS"
+            ],
+            
+            "🌾 Fertilizers & Agri": [
+                "UPL.NS", "PIIND.NS", "COROMANDEL.NS", "CHAMBLFERT.NS", "MADRASFER.NS",
+                "GSFC.NS", "ZUARI.NS", "RCF.NS", "MANGALAM.NS", "NFL.NS"
+            ],
+            
+            # ==================== ENERGY & RESOURCES ====================
+            "⛽ Oil & Gas - Large Cap": [
+                "RELIANCE.NS", "ONGC.NS", "IOC.NS", "BPCL.NS", "HPCL.NS",
+                "GAIL.NS", "PETRONET.NS", "OIL.NS", "MRF.NS", "CASTROLIND.NS"
+            ],
+            
+            "⛽ Oil & Gas - Mid Cap": [
+                "AEGISCHEM.NS", "DEEPAKFERT.NS", "GSPL.NS", "HINDPETRO.NS", "MRPL.NS",
+                "CHENNPETRO.NS", "TIDEWATER.NS", "ABAN.NS", "SELAN.NS", "BGRENERGY.NS"
+            ],
+            
+            "🔋 Renewable Energy": [
+                "ADANIGREEN.NS", "SUZLON.NS", "ORIENTGREEN.NS", "WEBSOL.NS", "BOROSIL.NS",
+                "CLEANSCIEN.NS", "VOLTAMP.NS", "RATTAN.NS", "INOXWIND.NS", "JPPOWER.NS"
+            ],
+            
+            "⚡ Power Equipment": [
+                "BHEL.NS", "CROMPTON.NS", "HAVELLS.NS", "POLYCAB.NS", "ORIENTELEC.NS",
+                "KECL.NS", "SIEMENS.NS", "ABB.NS", "SCHNEIDER.NS", "CUMMINSIND.NS"
+            ],
+            
+            # ==================== AUTOMOBILE SECTOR ====================
+            "🚗 Automobiles - Large Cap": [
+                "MARUTI.NS", "HYUNDAI.NS", "M&M.NS", "TATAMOTORS.NS", "BAJAJ-AUTO.NS",
+                "HEROMOTOCO.NS", "TVSMOTORS.NS", "ASHOKLEY.NS", "EICHERMOT.NS", "FORCEMOT.NS"
+            ],
+            
+            "🚗 Auto Components": [
+                "BOSCHLTD.NS", "MOTHERSON.NS", "BALKRISIND.NS", "MRF.NS", "APOLLOTYRE.NS",
+                "CEATLTD.NS", "BHARAT.NS", "EXIDEIND.NS", "AMARA.NS", "SUNDRMFAST.NS"
+            ],
+            
+            "🏍️ Two Wheelers": [
+                "BAJAJ-AUTO.NS", "HEROMOTOCO.NS", "TVSMOTORS.NS", "EICHERMOT.NS", "RAJAJIAUTO.NS",
+                "MINDACORP.NS", "SUPRAJIT.NS", "MUNJALSHOW.NS", "SCHAEFFLER.NS", "ENDURANCE.NS"
+            ],
+            
+            # ==================== REAL ESTATE & CONSTRUCTION ====================
+            "🏘️ Real Estate - Large Cap": [
+                "DLF.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "BRIGADE.NS", "PRESTIGE.NS",
+                "SOBHA.NS", "PHOENIXLTD.NS", "KOLTE.NS", "MAHLIFE.NS", "SUNTECK.NS"
+            ],
+            
+            "🏘️ Real Estate - Mid Cap": [
+                "LODHA.NS", "MAHINDRA.NS", "RAYMOND.NS", "PURAVANKARA.NS", "ASHOKA.NS",
+                "MAHLOG.NS", "ANANTRAJ.NS", "OMAXE.NS", "UNITECH.NS", "PARSVNATH.NS"
+            ],
+            
+            "🏗️ Construction": [
+                "LT.NS", "HCC.NS", "IRCON.NS", "RVNL.NS", "NBCC.NS",
+                "KNR.NS", "PNC.NS", "SADBHAV.NS", "JAIBALAJI.NS", "WELCORP.NS"
+            ],
+            
+            # ==================== MEDIA & ENTERTAINMENT ====================
+            "📺 Media & Entertainment": [
+                "ZEEL.NS", "PVR.NS", "INOXLEISUR.NS", "BALAJITELE.NS", "SAREGAMA.NS",
+                "TIPS.NS", "EROS.NS", "NETWORK18.NS", "JAINIRRIG.NS", "NAZARA.NS"
+            ],
+            
+            "📰 Publishing & Digital": [
+                "HT.NS", "DBCORP.NS", "SANDESH.NS", "JAGRAN.NS", "NAVNEET.NS",
+                "JUSTDIAL.NS", "INDIAMART.NS", "NAUKRI.NS", "MATRIMONY.NS", "ZOMATO.NS"
+            ],
+            
+            # ==================== AVIATION & LOGISTICS ====================
+            "✈️ Aviation": [
+                "SPICEJET.NS", "INDIGO.NS", "JETAIRWAYS.NS", "GMR.NS", "GVK.NS",
+                "AAI.NS", "MAHINDRA.NS", "BLUEDART.NS", "PATEL.NS", "SPANDANA.NS"
+            ],
+            
+            "🚛 Logistics & Transportation": [
+                "CONCOR.NS", "GATI.NS", "BLUEDART.NS", "VRL.NS", "TCI.NS",
+                "MAHLOG.NS", "SICAL.NS", "ALLCARGO.NS", "SNOWMAN.NS", "MAHINDRA.NS"
+            ],
+            
+            # ==================== RETAIL & E-COMMERCE ====================
+            "🛒 Retail - Large Cap": [
+                "RELIANCE.NS", "AVENUELSX.NS", "SHOPSSTOP.NS", "TRENTLTD.NS", "VMART.NS",
+                "FRETAIL.NS", "SPENCERS.NS", "LANDMARK.NS", "TITAN.NS", "KALYAN.NS"
+            ],
+            
+            "🛒 E-Commerce & Digital": [
+                "ZOMATO.NS", "NYKAA.NS", "POLICYBZR.NS", "CARDUNIA.NS", "PAYTM.NS",
+                "EASEMYTRIP.NS", "MATRIMONY.NS", "JUSTDIAL.NS", "INDIAMART.NS", "NAUKRI.NS"
+            ],
+            
+            # ==================== INTERNATIONAL MARKETS ====================
+            "🌍 US Tech Giants": [
+                "AAPL", "GOOGL", "MSFT", "AMZN", "META", "TSLA", "NFLX", "NVDA", "CRM", "ORCL"
+            ],
+            
+            "🌍 US Blue Chips": [
+                "JPM", "JNJ", "PG", "KO", "PEP", "WMT", "V", "MA", "HD", "DIS"
+            ],
+            
+            "🌍 Global Banks": [
+                "JPM", "BAC", "WFC", "GS", "MS", "C", "BCS", "DB", "CS", "UBS"
+            ],
+            
+            "🌍 European Stocks": [
+                "ASML", "SAP", "NESN.SW", "NOVN.SW", "ROG.SW", "MC.PA", "LVMH.PA", "OR.PA", "SAN.PA", "BNP.PA"
+            ],
+            
+            # ==================== CRYPTOCURRENCY & FINTECH ====================
+            "₿ Cryptocurrency ETFs": [
+                "BITO", "BTCC.TO", "ETHE", "COIN", "MARA", "RIOT", "HUT.TO", "BITF.TO", "SQ", "PYPL"
+            ],
+            
+            "💳 Fintech & Payments": [
+                "PAYTM.NS", "POLICYBZR.NS", "V", "MA", "PYPL", "SQ", "ADYEN.AS", "TEAM", "CRM", "NOW"
+            ],
+            
+            # ==================== COMMODITIES & PRECIOUS METALS ====================
+            "🥇 Gold & Precious Metals": [
+                "GOLDBEES.NS", "GOLDGUINEA.NS", "TITAN.NS", "KALYAN.NS", "THANGAMAY.NS",
+                "GLD", "SLV", "PALL", "PPLT", "IAU"
+            ],
+            
+            "🛢️ Commodity ETFs": [
+                "USO", "UNG", "DBA", "JJG", "JJU", "JJT", "JJS", "JJN", "JJC", "JO"
+            ],
+            
+            # ==================== THEMATIC INVESTMENTS ====================
+            "🤖 AI & Technology": [
+                "TCS.NS", "INFY.NS", "WIPRO.NS", "NVDA", "AMD", "INTC", "TSM", "QCOM", "AVGO", "MU"
+            ],
+            
+            "🌱 ESG & Sustainability": [
+                "ADANIGREEN.NS", "SUZLON.NS", "TATAPOWER.NS", "ICLN", "QCLN", "PBW", "FAN", "SMOG", "CNRG", "ACES"
+            ],
+            
+            "🏥 Healthcare Innovation": [
+                "SUNPHARMA.NS", "DRREDDY.NS", "APOLLOHOSP.NS", "JNJ", "PFE", "MRNA", "BNTX", "GILD", "AMGN", "BIIB"
+            ],
+            
+            "🚀 Space & Defense": [
+                "HAL.NS", "BEL.NS", "BEML.NS", "BA", "LMT", "RTX", "NOC", "GD", "SPCE", "UFO"
+            ],
+            
+            # ==================== DIVIDEND ARISTOCRATS ====================
+            "💰 High Dividend Yield - Indian": [
+                "SBIN.NS", "COALINDIA.NS", "NMDC.NS", "IOC.NS", "ONGC.NS",
+                "VEDL.NS", "HINDALCO.NS", "ITC.NS", "POWERGRID.NS", "NTPC.NS"
+            ],
+            
+            "💰 Dividend Aristocrats - Global": [
+                "JNJ", "PG", "KO", "PEP", "WMT", "MMM", "ABT", "CL", "GD", "SYY"
+            ],
+            
+            # ==================== SMALL CAP GEMS ====================
+            "💎 Small Cap - High Growth": [
+                "DIXON.NS", "CLEANSCIEN.NS", "ROSSARI.NS", "HAPPSTMNDS.NS", "ROUTE.NS",
+                "LAXMIMACH.NS", "TIINDIA.NS", "KFINTECH.NS", "DEVYANI.NS", "EASEMYTRIP.NS"
+            ],
+            
+            "💎 Micro Cap - Emerging": [
+                "AMBER.NS", "WEBELSOLAR.NS", "MISHTANN.NS", "RTNINDIA.NS", "INVENTURE.NS",
+                "SHREYAS.NS", "UGAR.NS", "CENTUM.NS", "DPSCLTD.NS", "VSSL.NS"
+            ],
+            
+            # ==================== SECTOR ETFs ====================
+            "📊 Indian Sector ETFs": [
+                "BANKBEES.NS", "ITBEES.NS", "PHARMBEES.NS", "AUTOBEES.NS", "PSUBNKBEES.NS",
+                "PVTBNKBEES.NS", "INFRABEES.NS", "FMCGBEES.NS", "METALBEES.NS", "ENERGYBEES.NS"
+            ],
+            
+            "📊 Global Sector ETFs": [
+                "XLF", "XLK", "XLV", "XLE", "XLI", "XLY", "XLP", "XLB", "XLU", "XLRE"
+            ],
+            
+            # ==================== REGIONAL & COUNTRY ETFs ====================
+            "🌏 Emerging Markets": [
+                "EEM", "VWO", "IEMG", "EWZ", "INDA", "FXI", "EWT", "EWY", "RSX", "EPOL"
+            ],
+            
+            "🌍 Developed Markets": [
+                "EFA", "VEA", "IEFA", "EWJ", "EWG", "EWU", "EWC", "EWA", "EWS", "EWP"
+            ]
         }
         
-        # Stock selection method
+        # Enhanced selection interface
+        st.subheader("🎯 Selection Method")
+        
         selection_method = st.radio(
-            "Selection Method:",
-            ["Quick Select by Category", "Custom Search", "Upload CSV", "Market Cap Filter"],
-            help="Choose how you want to select stocks for analysis"
+            "Choose your selection approach:",
+            [
+                "📂 Browse by Categories", 
+                "🔍 Search by Keywords", 
+                "📝 Manual Entry", 
+                "📁 Upload CSV File",
+                "⭐ Popular Picks",
+                "🎲 Random Portfolio Generator"
+            ],
+            help="Different ways to build your stock portfolio"
         )
         
         selected_tickers = []
         
-        if selection_method == "Quick Select by Category":
-            st.subheader("Select by Categories")
-            selected_categories = st.multiselect(
-                "Choose stock categories:",
-                list(stock_categories.keys()),
-                default=["Large Cap - Banking", "Large Cap - IT"],
-                help="Select one or more categories"
+        # ==================== CATEGORY BROWSING ====================
+        if selection_method == "📂 Browse by Categories":
+            st.subheader("📊 Stock Categories")
+            
+            # Market segment filter
+            market_segments = st.multiselect(
+                "🏢 Market Segments:",
+                ["🇮🇳 Indian Stocks", "🇺🇸 US Stocks", "🌍 International", "📊 ETFs", "₿ Crypto-related"],
+                default=["🇮🇳 Indian Stocks"],
+                help="Filter categories by market segment"
             )
             
+            # Filter categories based on market segment
+            filtered_categories = {}
+            
+            for category, stocks in stock_categories.items():
+                include_category = False
+                
+                if "🇮🇳 Indian Stocks" in market_segments:
+                    if any(stock.endswith('.NS') for stock in stocks):
+                        include_category = True
+                
+                if "🇺🇸 US Stocks" in market_segments:
+                    if any(not stock.endswith('.NS') and not any(ext in stock for ext in ['.PA', '.SW', '.TO', '.AS']) for stock in stocks):
+                        include_category = True
+                
+                if "🌍 International" in market_segments:
+                    if any(any(ext in stock for ext in ['.PA', '.SW', '.TO', '.AS']) for stock in stocks):
+                        include_category = True
+                
+                if "📊 ETFs" in market_segments:
+                    if "ETF" in category or "BEES" in category or any("BEES" in stock for stock in stocks):
+                        include_category = True
+                
+                if "₿ Crypto-related" in market_segments:
+                    if "Cryptocurrency" in category or "Fintech" in category:
+                        include_category = True
+                
+                if include_category:
+                    filtered_categories[category] = stocks
+            
+            # Category selection
+            selected_categories = st.multiselect(
+                "📋 Select Categories:",
+                list(filtered_categories.keys()),
+                help="Choose one or more categories to explore"
+            )
+            
+            # Stock selection within categories
             for category in selected_categories:
-                with st.expander(f"{category} - Select Stocks"):
-                    category_stocks = st.multiselect(
+                with st.expander(f"📈 {category} ({len(filtered_categories[category])} stocks)"):
+                    
+                    # Select all/none buttons
+                    col1, col2 = st.columns(2)
+                    select_all_key = f"select_all_{category}"
+                    select_none_key = f"select_none_{category}"
+                    
+                    with col1:
+                        if st.button(f"✅ Select All", key=select_all_key):
+                            st.session_state[f"stocks_{category}"] = filtered_categories[category]
+                    
+                    with col2:
+                        if st.button(f"❌ Clear All", key=select_none_key):
+                            st.session_state[f"stocks_{category}"] = []
+                    
+                    # Individual stock selection
+                    selected_stocks = st.multiselect(
                         f"Stocks from {category}:",
-                        stock_categories[category],
-                        default=stock_categories[category][:2] if len(stock_categories[category]) >= 2 else stock_categories[category]
+                        filtered_categories[category],
+                        default=st.session_state.get(f"stocks_{category}", filtered_categories[category][:3]),
+                        key=f"multiselect_{category}",
+                        help=f"Select individual stocks from {category}"
                     )
-                    selected_tickers.extend(category_stocks)
+                    
+                    selected_tickers.extend(selected_stocks)
             
             # Remove duplicates while preserving order
             selected_tickers = list(dict.fromkeys(selected_tickers))
-            
-        elif selection_method == "Custom Search":
-            st.subheader("Manual Stock Entry")
-            custom_input = st.text_area(
-                "Enter stock symbols (one per line):",
-                "RELIANCE.NS\nTCS.NS\nHDFCBANK.NS\nINFY.NS\nHINDUNILVR.NS",
-                help="Enter NSE symbols ending with .NS (e.g., RELIANCE.NS)"
-            )
-            selected_tickers = [ticker.strip().upper() for ticker in custom_input.split('\n') if ticker.strip()]
-            
-        elif selection_method == "Upload CSV":
-            st.subheader("Upload Stock List")
-            uploaded_file = st.file_uploader("Upload CSV with stock symbols", type=['csv'])
-            if uploaded_file:
-                try:
-                    df = pd.read_csv(uploaded_file)
-                    if 'symbol' in df.columns:
-                        selected_tickers = df['symbol'].tolist()
-                    elif 'ticker' in df.columns:
-                        selected_tickers = df['ticker'].tolist()
-                    else:
-                        selected_tickers = df.iloc[:, 0].tolist()
-                    st.success(f"Loaded {len(selected_tickers)} stocks from CSV")
-                except Exception as e:
-                    st.error(f"Error reading file: {e}")
         
-        elif selection_method == "Market Cap Filter":
-            st.subheader("Filter by Market Cap")
-            market_cap_category = st.selectbox(
-                "Market Cap Category:",
-                ["Large Cap (>₹20,000 Cr)", "Mid Cap (₹5,000-20,000 Cr)", "Small Cap (<₹5,000 Cr)", "Mixed Portfolio"]
+        # ==================== KEYWORD SEARCH ====================
+        elif selection_method == "🔍 Search by Keywords":
+            st.subheader("🔎 Smart Stock Search")
+            
+            # Create searchable stock database
+            all_stocks = []
+            for category, stocks in stock_categories.items():
+                for stock in stocks:
+                    all_stocks.append({
+                        'ticker': stock,
+                        'category': category,
+                        'market': 'Indian' if stock.endswith('.NS') else 'International',
+                        'searchable': f"{stock} {category}".lower()
+                    })
+            
+            # Search input
+            search_query = st.text_input(
+                "🔍 Search stocks, sectors, or companies:",
+                placeholder="e.g., 'banking', 'tech', 'RELIANCE', 'dividend'",
+                help="Search by ticker, company name, or sector"
             )
             
-            if market_cap_category == "Large Cap (>₹20,000 Cr)":
-                large_cap_stocks = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "HINDUNILVR.NS", 
-                                  "ICICIBANK.NS", "KOTAKBANK.NS", "LT.NS", "SBIN.NS", "BHARTIARTL.NS"]
-                selected_tickers = st.multiselect("Select Large Cap Stocks:", large_cap_stocks, default=large_cap_stocks[:5])
-            else:
-                st.info("Market cap filtering available in full version")
-                selected_tickers = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS"]
-        
-        # Advanced selection options
-        if selected_tickers:
-            st.subheader("🔧 Selection Options")
+            # Additional filters
+            col1, col2 = st.columns(2)
+            with col1:
+                market_filter = st.selectbox(
+                    "🌍 Market:",
+                    ["All Markets", "Indian Stocks (.NS)", "International Stocks"],
+                    help="Filter by market"
+                )
             
-            # Portfolio size validation
-            max_stocks = st.slider(
-                "Maximum stocks to analyze:",
-                min_value=1,
-                max_value=20,
-                value=min(10, len(selected_tickers)),
-                help="Limit number of stocks for optimal performance"
-            )
+            with col2:
+                max_results = st.slider(
+                    "📊 Max Results:",
+                    min_value=10,
+                    max_value=100,
+                    value=20,
+                    help="Maximum number of search results"
+                )
             
-            if len(selected_tickers) > max_stocks:
-                st.warning(f"⚠️ Selected {len(selected_tickers)} stocks. Will analyze top {max_stocks} by preference.")
-                selected_tickers = selected_tickers[:max_stocks]
-        
-        # Display selection summary with enhanced info
-        if selected_tickers:
-            st.success(f"✅ {len(selected_tickers)} stocks selected for analysis")
-            
-            with st.expander("📋 Selected Portfolio Overview"):
-                for i, ticker in enumerate(selected_tickers, 1):
-                    # Try to categorize the ticker
-                    category = "Unknown"
-                    for cat, stocks in stock_categories.items():
-                        if ticker in stocks:
-                            category = cat.split(" - ")[1] if " - " in cat else cat
-                            break
-                    st.write(f"{i}. **{ticker}** - {category}")
+            # Perform search
+            if search_query:
+                search_terms = search_query.lower().split()
+                matched_stocks = []
                 
-                if len(selected_tickers) > 1:
-                    st.info(f"💡 Portfolio diversification: {len(set([cat.split(' - ')[1] for cat in stock_categories.keys() for ticker in selected_tickers if ticker in stock_categories[cat]]))} sectors represented")
+                for stock_info in all_stocks:
+                    # Check if all search terms match
+                    if all(term in stock_info['searchable'] for term in search_terms):
+                        # Apply market filter
+                        if market_filter == "All Markets":
+                            matched_stocks.append(stock_info)
+                        elif market_filter == "Indian Stocks (.NS)" and stock_info['ticker'].endswith('.NS'):
+                            matched_stocks.append(stock_info)
+                        elif market_filter == "International Stocks" and not stock_info['ticker'].endswith('.NS'):
+                            matched_stocks.append(stock_info)
+                
+                # Display results
+                if matched_stocks:
+                    st.success(f"Found {len(matched_stocks)} matching stocks")
+                    
+                    # Limit results
+                    display_stocks = matched_stocks[:max_results]
+                    
+                    # Create selection interface
+                    search_results = []
+                    for stock_info in display_stocks:
+                        search_results.append(f"{stock_info['ticker']} - {stock_info['category']}")
+                    
+                    selected_results = st.multiselect(
+                        "📋 Select from search results:",
+                        search_results,
+                        help="Choose stocks from search results"
+                    )
+                    
+                    # Extract tickers
+                    selected_tickers = [result.split(' - ')[0] for result in selected_results]
+                    
+                else:
+                    st.info(f"No stocks found matching '{search_query}'. Try different keywords.")
+        
+        # ==================== MANUAL ENTRY ====================
+        elif selection_method == "📝 Manual Entry":
+            st.subheader("✍️ Manual Stock Entry")
+            
+            # Text area for manual input
+            manual_input = st.text_area(
+                "📝 Enter stock symbols (one per line):",
+                value="RELIANCE.NS\nTCS.NS\nHDFCBANK.NS\nINFY.NS\nHINDUNILVR.NS",
+                height=200,
+                help="Enter stock symbols, one per line. Use .NS suffix for Indian stocks."
+            )
+            
+            # Format options
+            col1, col2 = st.columns(2)
+            with col1:
+                auto_format = st.checkbox(
+                    "🔧 Auto-format Indian stocks",
+                    value=True,
+                    help="Automatically add .NS suffix to Indian stock symbols"
+                )
+            
+            with col2:
+                validate_symbols = st.checkbox(
+                    "✅ Validate symbols",
+                    value=True,
+                    help="Check if symbols are in our database"
+                )
+            
+            # Process manual input
+            if manual_input:
+                raw_tickers = [ticker.strip().upper() for ticker in manual_input.split('\n') if ticker.strip()]
+                
+                # Auto-format Indian stocks
+                if auto_format:
+                    formatted_tickers = []
+                    for ticker in raw_tickers:
+                        if not any(suffix in ticker for suffix in ['.NS', '.BO', '.PA', '.SW', '.TO', '.AS']):
+                            # Check if it's likely an Indian stock
+                            indian_indicators = ['RELIANCE', 'TCS', 'HDFC', 'ICICI', 'INFY', 'WIPRO', 'SBI', 'BHARTI']
+                            if any(indicator in ticker for indicator in indian_indicators) or len(ticker) <= 12:
+                                formatted_tickers.append(f"{ticker}.NS")
+                            else:
+                                formatted_tickers.append(ticker)
+                        else:
+                            formatted_tickers.append(ticker)
+                    selected_tickers = formatted_tickers
+                else:
+                    selected_tickers = raw_tickers
+                
+                # Validate symbols
+                if validate_symbols:
+                    all_available_stocks = []
+                    for stocks in stock_categories.values():
+                        all_available_stocks.extend(stocks)
+                    
+                    valid_tickers = []
+                    invalid_tickers = []
+                    
+                    for ticker in selected_tickers:
+                        if ticker in all_available_stocks:
+                            valid_tickers.append(ticker)
+                        else:
+                            invalid_tickers.append(ticker)
+                    
+                    if invalid_tickers:
+                        st.warning(f"⚠️ Unrecognized symbols: {', '.join(invalid_tickers)}")
+                        st.info("💡 These stocks will still be included but may not have all features available")
+                    
+                    if valid_tickers:
+                        st.success(f"✅ Recognized {len(valid_tickers)} symbols from our database")
+        
+        # ==================== CSV UPLOAD ====================
+        elif selection_method == "📁 Upload CSV File":
+            st.subheader("📁 CSV File Upload")
+            
+            uploaded_file = st.file_uploader(
+                "📤 Upload CSV file with stock symbols:",
+                type=['csv', 'txt'],
+                help="CSV should have symbols in first column or a column named 'symbol', 'ticker', or 'stock'"
+            )
+            
+            if uploaded_file is not None:
+                try:
+                    # Read CSV
+                    df = pd.read_csv(uploaded_file)
+                    st.success(f"✅ File uploaded successfully! Found {len(df)} rows.")
+                    
+                    # Show preview
+                    with st.expander("👀 File Preview"):
+                        st.dataframe(df.head(10))
+                    
+                    # Column selection
+                    symbol_column = st.selectbox(
+                        "📊 Select column containing stock symbols:",
+                        df.columns.tolist(),
+                        index=0,
+                        help="Choose which column contains the stock symbols"
+                    )
+                    
+                    # Extract symbols
+                    if symbol_column in df.columns:
+                        uploaded_tickers = df[symbol_column].dropna().astype(str).str.strip().str.upper().tolist()
+                        
+                        # Remove duplicates
+                        uploaded_tickers = list(dict.fromkeys(uploaded_tickers))
+                        
+                        st.info(f"📈 Found {len(uploaded_tickers)} unique symbols in '{symbol_column}' column")
+                        
+                        # Option to filter/modify
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            max_symbols = st.slider(
+                                "📊 Maximum symbols to use:",
+                                min_value=1,
+                                max_value=min(100, len(uploaded_tickers)),
+                                value=min(20, len(uploaded_tickers)),
+                                help="Limit number of symbols for performance"
+                            )
+                        
+                        with col2:
+                            add_ns_suffix = st.checkbox(
+                                "🇮🇳 Add .NS for Indian stocks",
+                                value=True,
+                                help="Automatically add .NS suffix"
+                            )
+                        
+                        # Process tickers
+                        selected_tickers = uploaded_tickers[:max_symbols]
+                        
+                        if add_ns_suffix:
+                            processed_tickers = []
+                            for ticker in selected_tickers:
+                                if not any(suffix in ticker for suffix in ['.NS', '.BO', '.PA', '.SW', '.TO', '.AS']):
+                                    processed_tickers.append(f"{ticker}.NS")
+                                else:
+                                    processed_tickers.append(ticker)
+                            selected_tickers = processed_tickers
+                        
+                        # Show final selection
+                        with st.expander("📋 Final Stock Selection"):
+                            st.write(selected_tickers[:20])  # Show first 20
+                            if len(selected_tickers) > 20:
+                                st.info(f"... and {len(selected_tickers) - 20} more stocks")
+                    
+                except Exception as e:
+                    st.error(f"❌ Error reading CSV file: {str(e)}")
+                    st.info("💡 Please ensure your CSV file is properly formatted")
+        
+        # ==================== POPULAR PICKS ====================
+        elif selection_method == "⭐ Popular Picks":
+            st.subheader("⭐ Popular Investment Themes")
+            
+            popular_themes = {
+                "🚀 Top Performers 2024": [
+                    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "HINDUNILVR.NS",
+                    "ICICIBANK.NS", "BHARTIARTL.NS", "LT.NS", "ULTRACEMCO.NS", "ASIANPAINT.NS"
+                ],
+                "💎 Value Investing": [
+                    "SBIN.NS", "COALINDIA.NS", "NMDC.NS", "IOC.NS", "ONGC.NS",
+                    "VEDL.NS", "HINDALCO.NS", "POWERGRID.NS", "NTPC.NS", "SAIL.NS"
+                ],
+                "📈 Growth Stocks": [
+                    "TCS.NS", "INFY.NS", "HDFCBANK.NS", "KOTAKBANK.NS", "NESTLEIND.NS",
+                    "DIXON.NS", "CLEANSCIEN.NS", "HAPPSTMNDS.NS", "ZOMATO.NS", "NYKAA.NS"
+                ],
+                "💰 Dividend Champions": [
+                    "COALINDIA.NS", "SBIN.NS", "NMDC.NS", "IOC.NS", "ONGC.NS",
+                    "VEDL.NS", "POWERGRID.NS", "NTPC.NS", "ITC.NS", "GAIL.NS"
+                ],
+                "🏦 Banking Powerhouse": [
+                    "HDFCBANK.NS", "ICICIBANK.NS", "KOTAKBANK.NS", "SBIN.NS", "AXISBANK.NS",
+                    "INDUSINDBK.NS", "BAJFINANCE.NS", "BAJAJFINSV.NS", "HDFCAMC.NS", "PNB.NS"
+                ],
+                "💻 Tech Titans": [
+                    "TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS",
+                    "LTI.NS", "MINDTREE.NS", "PERSISTENT.NS", "COFORGE.NS", "LTTS.NS"
+                ],
+                "🌐 Global Diversified": [
+                    "AAPL", "GOOGL", "MSFT", "AMZN", "TSLA", "RELIANCE.NS", "TCS.NS",
+                    "HDFCBANK.NS", "ASML", "TSM"
+                ],
+                "🌱 ESG Leaders": [
+                    "ADANIGREEN.NS", "TATAPOWER.NS", "SUZLON.NS", "NESTLEIND.NS", "UNILEVER.NS",
+                    "ICLN", "QCLN", "PBW", "HDFCBANK.NS", "TCS.NS"
+                ],
+                "🏥 Healthcare Heroes": [
+                    "SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS", "APOLLOHOSP.NS", "BIOCON.NS",
+                    "JNJ", "PFE", "MRNA", "ABBOTT.NS", "FORTIS.NS"
+                ],
+                "🔮 Future Tech": [
+                    "TCS.NS", "INFY.NS", "NVDA", "AMD", "TSLA", "ZOMATO.NS",
+                    "PAYTM.NS", "NYKAA.NS", "HAPPSTMNDS.NS", "COFORGE.NS"
+                ]
+            }
+            
+            selected_theme = st.selectbox(
+                "🎯 Choose an investment theme:",
+                list(popular_themes.keys()),
+                help="Pre-curated portfolios based on popular investment strategies"
+            )
+            
+            # Display theme details
+            theme_stocks = popular_themes[selected_theme]
+            
+            st.info(f"📊 **{selected_theme}** contains {len(theme_stocks)} carefully selected stocks")
+            
+            # Show stocks in theme
+            with st.expander(f"👀 View all stocks in {selected_theme}"):
+                cols = st.columns(3)
+                for i, stock in enumerate(theme_stocks):
+                    with cols[i % 3]:
+                        st.write(f"• {stock}")
+            
+            # Selection options
+            col1, col2 = st.columns(2)
+            with col1:
+                use_all = st.checkbox(
+                    f"✅ Use all {len(theme_stocks)} stocks",
+                    value=True,
+                    help="Include all stocks from this theme"
+                )
+            
+            with col2:
+                if not use_all:
+                    max_stocks = st.slider(
+                        "📊 Number of stocks:",
+                        min_value=1,
+                        max_value=len(theme_stocks),
+                        value=min(10, len(theme_stocks)),
+                        help="Choose how many stocks from this theme"
+                    )
+            
+            # Set selected tickers
+            if use_all:
+                selected_tickers = theme_stocks.copy()
+            else:
+                selected_tickers = theme_stocks[:max_stocks]
+        
+        # ==================== RANDOM PORTFOLIO GENERATOR ====================
+        elif selection_method == "🎲 Random Portfolio Generator":
+            st.subheader("🎲 Random Portfolio Generator")
+            
+            # Generator options
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                portfolio_size = st.slider(
+                    "📊 Portfolio Size:",
+                    min_value=3,
+                    max_value=30,
+                    value=10,
+                    help="Number of stocks in random portfolio"
+                )
+            
+            with col2:
+                market_focus = st.selectbox(
+                    "🌍 Market Focus:",
+                    ["Indian Stocks Only", "Global Mix", "US Stocks Only", "Mixed with ETFs"],
+                    help="Geographic focus for random selection"
+                )
+            
+            # Sector diversification
+            diversification = st.selectbox(
+                "🎯 Diversification Level:",
+                ["High Diversification", "Moderate Diversification", "Sector Focused", "Completely Random"],
+                index=1,
+                help="How diversified should the random portfolio be"
+            )
+            
+            # Generate button
+            if st.button("🎲 Generate Random Portfolio", use_container_width=True):
+                
+                # Filter stocks based on market focus
+                available_stocks = []
+                
+                if market_focus == "Indian Stocks Only":
+                    for stocks in stock_categories.values():
+                        available_stocks.extend([s for s in stocks if s.endswith('.NS')])
+                elif market_focus == "US Stocks Only":
+                    for stocks in stock_categories.values():
+                        available_stocks.extend([s for s in stocks if not s.endswith('.NS') and not any(ext in s for ext in ['.PA', '.SW', '.TO', '.AS'])])
+                elif market_focus == "Mixed with ETFs":
+                    for category, stocks in stock_categories.items():
+                        if "ETF" in category or "BEES" in category:
+                            available_stocks.extend(stocks)
+                        else:
+                            available_stocks.extend(stocks[:5])  # Limit non-ETF stocks
+                else:  # Global Mix
+                    for stocks in stock_categories.values():
+                        available_stocks.extend(stocks)
+                
+                # Remove duplicates
+                available_stocks = list(set(available_stocks))
+                
+                # Generate random portfolio with diversification logic
+                if diversification == "High Diversification":
+                    # Try to pick from different sectors
+                    selected_tickers = []
+                    used_categories = set()
+                    
+                    attempts = 0
+                    while len(selected_tickers) < portfolio_size and attempts < 1000:
+                        # Pick random stock
+                        random_stock = np.random.choice(available_stocks)
+                        
+                        # Find its category
+                        stock_category = None
+                        for category, stocks in stock_categories.items():
+                            if random_stock in stocks:
+                                stock_category = category.split(' - ')[0] if ' - ' in category else category.split(' ')[0]
+                                break
+                        
+                        # Add if category not overused
+                        if stock_category not in used_categories or len(used_categories) >= 5:
+                            selected_tickers.append(random_stock)
+                            used_categories.add(stock_category)
+                        
+                        attempts += 1
+                
+                else:
+                    # Simple random selection
+                    selected_tickers = list(np.random.choice(
+                        available_stocks, 
+                        size=min(portfolio_size, len(available_stocks)), 
+                        replace=False
+                    ))
+                
+                st.success(f"🎉 Generated random portfolio with {len(selected_tickers)} stocks!")
+                
+                # Show generated portfolio
+                with st.expander("🎲 Your Random Portfolio"):
+                    cols = st.columns(3)
+                    for i, stock in enumerate(selected_tickers):
+                        with cols[i % 3]:
+                            st.write(f"• {stock}")
+        
+        # ==================== PORTFOLIO SUMMARY AND VALIDATION ====================
+        
+        # Remove duplicates while preserving order
+        selected_tickers = list(dict.fromkeys(selected_tickers))
+        
+        # Portfolio summary
+        if selected_tickers:
+            st.markdown("---")
+            st.subheader("📋 Portfolio Summary")
+            
+            # Summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("📊 Total Stocks", len(selected_tickers))
+            
+            with col2:
+                indian_count = sum(1 for ticker in selected_tickers if ticker.endswith('.NS'))
+                st.metric("🇮🇳 Indian Stocks", indian_count)
+            
+            with col3:
+                international_count = len(selected_tickers) - indian_count
+                st.metric("🌍 International", international_count)
+            
+            with col4:
+                # Estimate diversification score
+                if len(selected_tickers) >= 10:
+                    diversification = "High 🌟"
+                elif len(selected_tickers) >= 5:
+                    diversification = "Medium 📊"
+                else:
+                    diversification = "Low ⚠️"
+                st.info(f"**Diversification:** {diversification}")
+            
+            # Portfolio composition analysis
+            with st.expander("📊 Detailed Portfolio Analysis"):
+                
+                # Market distribution
+                market_dist = {"Indian (.NS)": 0, "US Stocks": 0, "Other International": 0, "ETFs": 0}
+                
+                for ticker in selected_tickers:
+                    if ticker.endswith('.NS'):
+                        market_dist["Indian (.NS)"] += 1
+                    elif any(ext in ticker for ext in ['.PA', '.SW', '.TO', '.AS']):
+                        market_dist["Other International"] += 1
+                    elif "BEES" in ticker or ticker in ["GLD", "SLV", "USO", "EEM", "VTI"]:
+                        market_dist["ETFs"] += 1
+                    else:
+                        market_dist["US Stocks"] += 1
+                
+                st.write("🌍 **Market Distribution:**")
+                for market, count in market_dist.items():
+                    if count > 0:
+                        percentage = (count / len(selected_tickers)) * 100
+                        st.write(f"• {market}: {count} stocks ({percentage:.1f}%)")
+                
+                # Sector analysis (simplified)
+                sector_count = {}
+                for ticker in selected_tickers:
+                    for category, stocks in stock_categories.items():
+                        if ticker in stocks:
+                            sector = category.split(' - ')[0] if ' - ' in category else category.split()[0]
+                            sector_count[sector] = sector_count.get(sector, 0) + 1
+                            break
+                
+                if sector_count:
+                    st.write("🏭 **Sector Distribution:**")
+                    for sector, count in sorted(sector_count.items(), key=lambda x: x[1], reverse=True)[:10]:
+                        percentage = (count / len(selected_tickers)) * 100
+                        st.write(f"• {sector}: {count} stocks ({percentage:.1f}%)")
+            
+            # Validation and recommendations
+            st.subheader("💡 Portfolio Recommendations")
+            
+            recommendations = []
+            
+            # Size recommendations
+            if len(selected_tickers) < 3:
+                recommendations.append("⚠️ **Portfolio too small** - Consider adding more stocks for diversification")
+            elif len(selected_tickers) > 25:
+                recommendations.append("ℹ️ **Large portfolio** - Consider reducing to 15-20 stocks for easier management")
+            
+            # Market concentration
+            if indian_count / len(selected_tickers) > 0.8:
+                recommendations.append("🌍 **High India concentration** - Consider adding international stocks for global diversification")
+            elif indian_count == 0:
+                recommendations.append("🇮🇳 **No Indian exposure** - Consider adding some Indian stocks for emerging market exposure")
+            
+            # Sector concentration
+            if sector_count:
+                max_sector_count = max(sector_count.values())
+                if max_sector_count > len(selected_tickers) * 0.5:
+                    recommendations.append("⚖️ **Sector concentration risk** - Consider diversifying across more sectors")
+            
+            # Performance recommendations
+            if len(selected_tickers) >= 5 and len(selected_tickers) <= 20:
+                recommendations.append("✅ **Good portfolio size** - Optimal balance of diversification and manageability")
+            
+            if not recommendations:
+                recommendations.append("🌟 **Well-balanced portfolio** - Good diversification across markets and sectors")
+            
+            for rec in recommendations:
+                if rec.startswith("⚠️") or rec.startswith("ℹ️"):
+                    st.warning(rec)
+                elif rec.startswith("✅") or rec.startswith("🌟"):
+                    st.success(rec)
+                else:
+                    st.info(rec)
+            
+            # Final portfolio display
+            with st.expander("📋 Final Stock Selection"):
+                cols = st.columns(4)
+                for i, ticker in enumerate(selected_tickers):
+                    with cols[i % 4]:
+                        st.code(ticker)
+        
+        else:
+            st.info("👆 Select stocks using one of the methods above to build your portfolio")
         
         return selected_tickers
 
