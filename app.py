@@ -379,8 +379,7 @@ class FixedModuleLoader:
                 self.config = config
         
         class FallbackBacktestEngine:
-            def __init__(self, strategy, config):
-                self.strategy = strategy
+            def __init__(self,config):
                 self.config = config
             
             def run_backtest(self, data_dict, selected_tickers):
@@ -2435,11 +2434,23 @@ def create_predictions_and_targets_tab(predictions_df: pd.DataFrame, price_targe
             st.metric("Avg Target Return", f"{avg_target_return:.1f}%")
         
         with col2:
-            max_upside = price_targets_df['percentage_change'].max()
+            def get_percentage_column(df):
+                """Safely get the percentage change column name"""
+                for col in ['percentage_change', 'expected_return', 'target_return']:
+                    if col in df.columns:
+                        return col
+                return None
+
+            percentage_col = get_percentage_column(price_targets_df)
+            if percentage_col:
+                max_upside = price_targets_df[percentage_col].max()
+                min_downside = price_targets_df[percentage_col].min()
+            else:
+                max_upside = 0
+                min_downside = 0
             st.metric("Max Upside Potential", f"{max_upside:.1f}%")
         
         with col3:
-            min_downside = price_targets_df['percentage_change'].min()
             st.metric("Max Downside Risk", f"{min_downside:.1f}%")
         
         with col4:

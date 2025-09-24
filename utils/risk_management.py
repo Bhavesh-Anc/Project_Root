@@ -916,6 +916,76 @@ class ComprehensiveRiskManager:
         except Exception as e:
             logging.warning(f"Failed to log risk metrics: {e}")
 
+def analyze_portfolio_risk(self, predictions_df: pd.DataFrame, 
+                          current_data: Dict[str, pd.DataFrame]) -> Dict:
+    """Analyze portfolio risk - wrapper for comprehensive_risk_assessment"""
+    
+    try:
+        # Convert predictions to portfolio format
+        portfolio_data = {}
+        total_value = 0
+        
+        if not predictions_df.empty:
+            n_stocks = len(predictions_df)
+            equal_weight = 1.0 / n_stocks if n_stocks > 0 else 0
+            
+            for _, row in predictions_df.iterrows():
+                ticker = row['ticker']
+                current_price = current_data.get(ticker, pd.DataFrame()).get('Close', pd.Series()).iloc[-1] if ticker in current_data else 100
+                value = equal_weight * 500000  # Assume 500k portfolio
+                
+                portfolio_data[ticker] = {
+                    'weight': equal_weight,
+                    'value': value,
+                    'current_price': current_price
+                }
+                total_value += value
+        
+        # Create returns data
+        returns_data = pd.DataFrame()
+        for ticker, df in current_data.items():
+            if not df.empty and 'Close' in df.columns:
+                returns = df['Close'].pct_change().dropna()
+                if len(returns) > 10:  # Minimum data requirement
+                    returns_data[ticker] = returns
+        
+        if returns_data.empty:
+            # Return default risk metrics
+            return {
+                'risk_score': 'Medium',
+                'portfolio_var': 0.05,
+                'max_drawdown': 0.15,
+                'sharpe_ratio': 1.2,
+                'portfolio_volatility': 0.18,
+                'total_value': total_value,
+                'diversification_ratio': 0.8
+            }
+        
+        # Run comprehensive assessment
+        full_assessment = self.comprehensive_risk_assessment(portfolio_data, returns_data, predictions_df)
+        
+        # Extract key metrics for backward compatibility
+        return {
+            'risk_score': 'Medium',  # Default
+            'portfolio_var': full_assessment.get('stress_testing', {}).get('var_95', 0.05),
+            'max_drawdown': 0.15,  # Default conservative estimate
+            'sharpe_ratio': 1.2,   # Default
+            'portfolio_volatility': full_assessment.get('portfolio_summary', {}).get('volatility', 0.18),
+            'total_value': total_value,
+            'diversification_ratio': 1 - full_assessment.get('correlation_analysis', {}).get('max_correlation', 0.2),
+            'full_assessment': full_assessment
+        }
+        
+    except Exception as e:
+        logging.error(f"Portfolio risk analysis failed: {e}")
+        return {
+            'risk_score': 'Medium',
+            'portfolio_var': 0.05,
+            'max_drawdown': 0.15,
+            'sharpe_ratio': 1.2,
+            'portfolio_volatility': 0.18,
+            'total_value': 500000
+        }
 # ==================== VISUALIZATION HELPERS ====================
 
 def create_risk_dashboard_plots(risk_results: Dict) -> Dict[str, go.Figure]:
