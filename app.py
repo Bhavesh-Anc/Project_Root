@@ -1897,7 +1897,7 @@ def run_enhanced_comprehensive_analysis(selected_tickers: List[str], full_config
                 try:
                     config_obj = backtest_components['EnhancedBacktestConfig']()
                     strategy = backtest_components['MLStrategy'](models, config_obj)
-                    engine = backtest_components['EnhancedBacktestEngine'](strategy, config_obj)
+                    engine = backtest_components['EnhancedBacktestEngine'](config_obj)
                     backtest_results = engine.run_backtest(raw_data, selected_tickers)
                     st.success("✅ Backtesting completed")
                 except Exception as e:
@@ -2422,7 +2422,16 @@ def create_predictions_and_targets_tab(predictions_df: pd.DataFrame, price_targe
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            avg_target_return = price_targets_df['percentage_change'].mean()
+            percentage_col = None
+            for col in ['percentage_change', 'expected_return', 'target_return']:
+                if col in price_targets_df.columns:
+                    percentage_col = col
+                    break
+
+            if percentage_col:
+                avg_target_return = price_targets_df[percentage_col].mean()
+            else:
+                avg_target_return = 0
             st.metric("Avg Target Return", f"{avg_target_return:.1f}%")
         
         with col2:
