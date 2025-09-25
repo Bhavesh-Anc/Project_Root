@@ -125,7 +125,7 @@ class EnhancedBacktestConfig:
     max_holding_days: int = 60
     
     # Advanced risk settings
-    var_confidence: float = 0.95
+    var_confidence_level: float = 0.95
     kelly_cap: float = 0.25
     stress_test_frequency: int = 5
     risk_budget_limit: float = 0.2

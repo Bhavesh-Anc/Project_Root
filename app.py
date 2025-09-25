@@ -2440,7 +2440,7 @@ def create_predictions_and_targets_tab(predictions_df: pd.DataFrame, price_targe
                     if col in df.columns:
                         return col
                 return None
-
+    
             percentage_col = get_percentage_column(price_targets_df)
             if percentage_col:
                 max_upside = price_targets_df[percentage_col].max()
@@ -2449,7 +2449,7 @@ def create_predictions_and_targets_tab(predictions_df: pd.DataFrame, price_targe
                 max_upside = 0
                 min_downside = 0
             st.metric("Max Upside Potential", f"{max_upside:.1f}%")
-        
+
         with col3:
             st.metric("Max Downside Risk", f"{min_downside:.1f}%")
         
@@ -2461,7 +2461,8 @@ def create_predictions_and_targets_tab(predictions_df: pd.DataFrame, price_targe
         display_targets = price_targets_df.copy()
         display_targets['current_price'] = display_targets['current_price'].apply(lambda x: f"₹{x:.2f}")
         display_targets['target_price'] = display_targets['target_price'].apply(lambda x: f"₹{x:.2f}")
-        display_targets['percentage_change'] = display_targets['percentage_change'].apply(lambda x: f"{x:.1f}%")
+        if percentage_col:
+            display_targets[percentage_col] = display_targets[percentage_col].apply(lambda x: f"{x:.1f}%")
         display_targets['confidence'] = display_targets['confidence'].apply(lambda x: f"{x:.1%}")
         
         st.dataframe(
