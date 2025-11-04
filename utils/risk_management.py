@@ -704,7 +704,72 @@ class ComprehensiveRiskManager:
                 )
             """)
     
-    def comprehensive_risk_assessment(self, portfolio_data: Dict[str, Dict], 
+    def analyze_portfolio_risk(self, predictions_df: pd.DataFrame, raw_data: Dict[str, pd.DataFrame]) -> Dict:
+        """
+        Wrapper method to analyze portfolio risk from predictions and raw data
+
+        Args:
+            predictions_df: DataFrame with predictions and tickers
+            raw_data: Dictionary mapping tickers to their historical price data
+
+        Returns:
+            Dictionary with comprehensive risk analysis results
+        """
+        try:
+            # Convert raw_data to returns_data
+            returns_data = {}
+            for ticker, df in raw_data.items():
+                if not df.empty and 'Close' in df.columns:
+                    returns = df['Close'].pct_change().dropna()
+                    returns_data[ticker] = returns
+
+            if not returns_data:
+                return {'error': 'No valid returns data available'}
+
+            # Create returns DataFrame
+            returns_df = pd.DataFrame(returns_data)
+
+            # Create portfolio_data from predictions_df
+            portfolio_data = {}
+            total_confidence = 0
+
+            if not predictions_df.empty and 'ticker' in predictions_df.columns:
+                # Calculate weights based on confidence scores
+                if 'confidence' in predictions_df.columns:
+                    total_confidence = predictions_df['confidence'].sum()
+
+                for _, row in predictions_df.iterrows():
+                    ticker = row['ticker']
+                    confidence = row.get('confidence', 1.0)
+
+                    # Equal weight if no confidence, otherwise weight by confidence
+                    if total_confidence > 0:
+                        weight = confidence / total_confidence
+                    else:
+                        weight = 1.0 / len(predictions_df)
+
+                    portfolio_data[ticker] = {
+                        'weight': weight,
+                        'value': 1000000 * weight,  # Assume 1M portfolio
+                        'confidence': confidence
+                    }
+            else:
+                # Default equal weighting if predictions_df is empty
+                n_stocks = len(raw_data)
+                for ticker in raw_data.keys():
+                    portfolio_data[ticker] = {
+                        'weight': 1.0 / n_stocks,
+                        'value': 1000000 / n_stocks
+                    }
+
+            # Call comprehensive risk assessment
+            return self.comprehensive_risk_assessment(portfolio_data, returns_df, predictions_df)
+
+        except Exception as e:
+            logging.error(f"analyze_portfolio_risk failed: {e}")
+            return {'error': str(e)}
+
+    def comprehensive_risk_assessment(self, portfolio_data: Dict[str, Dict],
                                     returns_data: pd.DataFrame,
                                     predictions_df: pd.DataFrame = None) -> Dict:
         """Run comprehensive risk assessment"""

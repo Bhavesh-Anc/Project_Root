@@ -13,6 +13,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 import sys
+import shutil
 from typing import Dict, List, Optional, Tuple, Any
 from scipy import stats
 
@@ -56,7 +57,6 @@ class FixedModuleLoader:
         try:
             from utils.data_loader import get_comprehensive_stock_data, DATA_CONFIG
             self.modules_status['data_loader'] = True
-            st.success("✅ Data loader module loaded successfully")
             return get_comprehensive_stock_data, DATA_CONFIG
         except ImportError as e:
             st.warning(f"⚠️ Using fallback data loader: {e}")
@@ -67,7 +67,6 @@ class FixedModuleLoader:
         try:
             from utils.feature_engineer import create_features_enhanced, FEATURE_CONFIG
             self.modules_status['feature_engineer'] = True
-            st.success("✅ Feature engineering module loaded successfully")
             return create_features_enhanced, FEATURE_CONFIG
         except ImportError as e:
             st.warning(f"⚠️ Using fallback feature engineering: {e}")
@@ -84,7 +83,6 @@ class FixedModuleLoader:
                 load_models_optimized
             )
             self.modules_status['model'] = True
-            st.success("✅ Model module loaded successfully")
             return {
                 'train_models_enhanced_parallel': train_models_for_selected_stocks,  # FIXED: Map to wrapper
                 'predict_with_ensemble_and_targets': predict_with_ensemble_and_targets,
@@ -103,8 +101,7 @@ class FixedModuleLoader:
                 DrawdownTracker, PositionSizer, StressTester
             )
             self.modules_status['risk_management'] = True
-            st.success("✅ Risk management module loaded successfully")
-            
+
             return {
                 'ComprehensiveRiskManager': ComprehensiveRiskManager,
                 'RiskConfig': RiskConfig,
@@ -123,8 +120,7 @@ class FixedModuleLoader:
                 EnhancedBacktestEngine, EnhancedBacktestConfig, MLStrategy
             )
             self.modules_status['backtesting'] = True
-            st.success("✅ Backtesting module loaded successfully")
-            
+
             return {
                 'EnhancedBacktestEngine': EnhancedBacktestEngine,
                 'EnhancedBacktestConfig': EnhancedBacktestConfig,
@@ -141,15 +137,23 @@ class FixedModuleLoader:
         try:
             from utils.news_sentiment import (
                 AdvancedSentimentAnalyzer, get_sentiment_for_selected_stocks,
-                get_sentiment_insights
+                get_sentiment_insights, get_news_articles
             )
+            from utils.news_display_ui import (
+                display_news_feed, display_sentiment_comparison, display_news_timeline
+            )
+            from utils.multi_source_news import MultiSourceNewsAggregator
             self.modules_status['sentiment'] = True
-            st.success("✅ Sentiment analysis module loaded successfully")
-            
+
             return {
                 'AdvancedSentimentAnalyzer': AdvancedSentimentAnalyzer,
                 'get_sentiment_for_selected_stocks': get_sentiment_for_selected_stocks,
                 'get_sentiment_insights': get_sentiment_insights,
+                'get_news_articles': get_news_articles,
+                'MultiSourceNewsAggregator': MultiSourceNewsAggregator,
+                'display_news_feed': display_news_feed,
+                'display_sentiment_comparison': display_sentiment_comparison,
+                'display_news_timeline': display_news_timeline,
                 'available': True
             }
             
@@ -165,8 +169,7 @@ class FixedModuleLoader:
                 optimize_portfolio_for_selected_stocks
             )
             self.modules_status['portfolio'] = True
-            st.success("✅ Portfolio optimization module loaded successfully")
-            
+
             return {
                 'AdvancedPortfolioOptimizer': AdvancedPortfolioOptimizer,
                 'OptimizationConfig': OptimizationConfig,
@@ -177,7 +180,32 @@ class FixedModuleLoader:
         except ImportError as e:
             st.warning(f"⚠️ Portfolio optimization loading with fallback: {e}")
             return self._create_portfolio_fallback()
-    
+
+    def load_fundamental_analysis(self):
+        """Load fundamental analysis modules"""
+        try:
+            from utils.advanced_data_sources import AdvancedDataAggregator, get_market_overview
+            from utils.fundamental_ui import (
+                display_fundamental_summary,
+                display_fundamentals_comparison,
+                display_market_context
+            )
+            from config import ADVANCED_DATA_CONFIG
+
+            return {
+                'AdvancedDataAggregator': AdvancedDataAggregator,
+                'get_market_overview': get_market_overview,
+                'display_fundamental_summary': display_fundamental_summary,
+                'display_fundamentals_comparison': display_fundamentals_comparison,
+                'display_market_context': display_market_context,
+                'config': ADVANCED_DATA_CONFIG,
+                'available': True
+            }
+
+        except ImportError as e:
+            st.warning(f"⚠️ Fundamental analysis not available: {e}")
+            return {'available': False}
+
     def _create_fallback_data_loader(self):
         """Create fallback data loader"""
         import yfinance as yf
@@ -454,6 +482,7 @@ risk_components = module_loader.load_risk_management()
 backtest_components = module_loader.load_backtesting()
 sentiment_components = module_loader.load_sentiment_analysis()
 portfolio_components = module_loader.load_portfolio_optimization()
+fundamental_components = module_loader.load_fundamental_analysis()
 
 # Extract functions - FIXED MAPPING
 train_models_enhanced_parallel = model_functions['train_models_enhanced_parallel']  # Now correctly mapped to wrapper
@@ -467,6 +496,7 @@ RISK_MANAGEMENT_AVAILABLE = risk_components['available']
 BACKTESTING_AVAILABLE = backtest_components['available']
 SENTIMENT_AVAILABLE = sentiment_components['available']
 PORTFOLIO_OPTIMIZATION_AVAILABLE = portfolio_components['available']
+FUNDAMENTALS_AVAILABLE = fundamental_components['available']
 
 # ==================== ENHANCED CSS STYLING ====================
 
@@ -1757,25 +1787,18 @@ def run_enhanced_comprehensive_analysis(selected_tickers: List[str], full_config
             status_text.text(stages[0][0] + "...")
             progress_bar.progress(stages[0][1])
             
-            st.info(f"📊 Loading comprehensive market data for {len(selected_tickers)} stocks...")
             raw_data = get_comprehensive_stock_data(selected_tickers)
-            
+
             if not raw_data:
                 st.error("❌ Failed to load market data. Please check your internet connection and try again.")
                 return
-            
-            st.success(f"✅ Successfully loaded data for {len(raw_data)} stocks")
-            
-            # Data quality assessment
-            total_data_points = sum(len(df) for df in raw_data.values())
-            avg_data_points = total_data_points / len(raw_data)
-            st.info(f"📈 Data Quality: {total_data_points:,} total data points, {avg_data_points:.0f} average per stock")
+
+            st.success(f"✅ Loaded data for {len(raw_data)} stocks")
             
             # Stage 2: Advanced Feature Engineering
             status_text.text(stages[1][0] + "...")
             progress_bar.progress(stages[1][1])
-            
-            st.info("🔧 Creating advanced technical indicators and features...")
+
             featured_data = {}
             feature_stats = {'success': 0, 'total': len(raw_data)}
             
@@ -1792,15 +1815,148 @@ def run_enhanced_comprehensive_analysis(selected_tickers: List[str], full_config
             if not featured_data:
                 st.error("❌ Feature engineering failed for all stocks")
                 return
-            
-            st.success(f"✅ Feature engineering completed: {feature_stats['success']}/{feature_stats['total']} stocks processed")
-            
+
+            st.success(f"✅ Features created for {feature_stats['success']} stocks")
+
+            # ==================== FEATURE MISMATCH DETECTION ====================
+            # Check if cached models have feature count mismatch with current data
+            try:
+                current_feature_count = None
+                if featured_data:
+                    first_ticker = list(featured_data.keys())[0]
+                    first_df = featured_data[first_ticker]
+                    # Count features (exclude date/target columns)
+                    exclude_cols = ['target', 'future_return', 'date', 'Date', 'ticker']
+                    current_feature_count = len([col for col in first_df.columns if col not in exclude_cols])
+
+                # Check if model cache exists and has metadata
+                model_cache_path = "model_cache"
+                metadata_path = os.path.join(model_cache_path, "metadata.json")
+
+                if os.path.exists(metadata_path) and current_feature_count:
+                    import json
+                    try:
+                        with open(metadata_path, 'r') as f:
+                            metadata = json.load(f)
+
+                        cached_feature_count = metadata.get('feature_count', None)
+
+                        if cached_feature_count and cached_feature_count != current_feature_count:
+                            st.warning(f"⚠️ Feature mismatch: Clearing cache ({cached_feature_count} → {current_feature_count})")
+
+                            # Clear the model cache
+                            if os.path.exists(model_cache_path):
+                                shutil.rmtree(model_cache_path)
+                                os.makedirs(model_cache_path, exist_ok=True)
+                    except Exception as e:
+                        logging.warning(f"Could not check feature mismatch: {e}")
+
+            except Exception as e:
+                logging.warning(f"Feature mismatch detection failed: {e}")
+            # ====================================================================
+
+            # ==================== FUNDAMENTAL ANALYSIS DASHBOARD ====================
+            st.markdown("---")
+            st.header("📊 Fundamental Analysis Dashboard")
+
+            use_fundamentals = st.checkbox(
+                "Include Fundamental Analysis",
+                value=FUNDAMENTALS_AVAILABLE and full_config.get('enable_fundamentals', True),
+                help="Analyze company fundamentals, insider trading, and institutional ownership"
+            )
+
+            if use_fundamentals and selected_tickers and FUNDAMENTALS_AVAILABLE:
+
+                # Button to fetch fundamental data
+                if 'fundamentals_data' not in st.session_state:
+                    if st.button("🔄 Analyze Company Fundamentals", use_container_width=True):
+                        with st.spinner("Fetching fundamental data from yfinance..."):
+                            try:
+                                aggregator = fundamental_components['AdvancedDataAggregator']()
+
+                                # Progress bar
+                                progress_bar_fund = st.progress(0)
+                                status_text_fund = st.empty()
+
+                                # Get data with progress updates
+                                fundamentals_dict = {}
+                                for i, ticker in enumerate(selected_tickers):
+                                    try:
+                                        data = aggregator.get_complete_data(ticker)
+                                        fundamentals_dict[ticker] = data
+                                    except Exception as e:
+                                        logging.warning(f"Failed to get fundamentals for {ticker}: {e}")
+                                        fundamentals_dict[ticker] = {}
+
+                                    progress_bar_fund.progress((i + 1) / len(selected_tickers))
+
+                                # Store in session
+                                st.session_state['fundamentals_data'] = fundamentals_dict
+                                try:
+                                    st.session_state['market_context'] = aggregator.get_market_context()
+                                except:
+                                    st.session_state['market_context'] = {}
+
+                                progress_bar_fund.empty()
+                                status_text_fund.empty()
+
+                            except Exception as e:
+                                st.error(f"Error fetching fundamental data: {e}")
+
+                # Display fundamental analysis
+                if 'fundamentals_data' in st.session_state:
+
+                    fundamentals_data = st.session_state['fundamentals_data']
+                    market_context = st.session_state.get('market_context', {})
+
+                    # Create tabs
+                    fund_tab1, fund_tab2, fund_tab3 = st.tabs([
+                        "🌍 Market Context",
+                        "📊 Stock Comparison",
+                        "🔍 Detailed Analysis"
+                    ])
+
+                    with fund_tab1:
+                        if 'display_market_context' in fundamental_components:
+                            fundamental_components['display_market_context'](market_context)
+                        else:
+                            st.info("Market context display not available")
+
+                    with fund_tab2:
+                        if 'display_fundamentals_comparison' in fundamental_components:
+                            fundamental_components['display_fundamentals_comparison'](selected_tickers, fundamentals_data)
+                        else:
+                            st.info("Fundamental comparison not available")
+
+                    with fund_tab3:
+                        selected_stock_fund = st.selectbox(
+                            "Select stock for detailed fundamental analysis:",
+                            selected_tickers,
+                            key="fundamental_detail_selector"
+                        )
+
+                        if selected_stock_fund in fundamentals_data:
+                            if 'display_fundamental_summary' in fundamental_components:
+                                fundamental_components['display_fundamental_summary'](
+                                    selected_stock_fund,
+                                    fundamentals_data[selected_stock_fund]
+                                )
+                            else:
+                                st.info("Fundamental details not available")
+
+                else:
+                    st.info("👆 Click 'Analyze Company Fundamentals' to begin comprehensive fundamental analysis")
+
+            elif use_fundamentals and not FUNDAMENTALS_AVAILABLE:
+                st.warning("⚠️ Fundamental analysis modules not available. Please check installation.")
+
+            st.markdown("---")
+            # ====================================================================
+
             # Stage 3: Advanced ML Model Training
             status_text.text(stages[2][0] + "...")
             progress_bar.progress(stages[2][1])
-            
-            st.info(f"🤖 Training {len(full_config['model_types'])} ML model types using {full_config['ensemble_method']} ensemble...")
-            
+
             # FIXED: Use correct function call with proper parameters
             models = train_models_enhanced_parallel(
                 featured_data=featured_data,
@@ -1810,13 +1966,11 @@ def run_enhanced_comprehensive_analysis(selected_tickers: List[str], full_config
             )
             
             model_count = sum(len(model_dict) for model_dict in models.values()) if models else 0
-            st.success(f"✅ Model training completed: {model_count} models trained across {len(models)} stocks")
-            
+            st.success(f"✅ Trained {model_count} models")
+
             # Stage 4: Enhanced Prediction Generation
             status_text.text(stages[3][0] + "...")
             progress_bar.progress(stages[3][1])
-            
-            st.info("🔮 Generating ensemble predictions with confidence intervals...")
             
             # FIXED: Use correct function call with proper parameters
             predictions_df, price_targets_df = predict_with_ensemble_and_targets(
@@ -1827,9 +1981,49 @@ def run_enhanced_comprehensive_analysis(selected_tickers: List[str], full_config
                 ensemble_method=full_config['ensemble_method'],
                 selected_tickers=selected_tickers
             )
-            
+
             prediction_count = len(predictions_df) if not predictions_df.empty else 0
             st.success(f"✅ Predictions generated for {prediction_count} stocks")
+
+            # ==================== PREDICTION VALIDATION ====================
+            # Validate predictions to detect defaults/failures
+            try:
+                from utils.prediction_validator import validate_predictions, display_validation_warnings, diagnose_prediction_failure
+
+                validation_results = validate_predictions(predictions_df, price_targets_df)
+
+                # Display warnings if predictions are using defaults
+                if not validation_results['is_valid'] or validation_results['using_defaults']:
+                    st.markdown("---")
+                    st.subheader("⚠️ Prediction Validation")
+
+                    display_validation_warnings(validation_results)
+
+                    # Show diagnostics
+                    if not validation_results['is_valid']:
+                        with st.expander("🔍 Diagnostic Information"):
+                            diagnostics = diagnose_prediction_failure(models, featured_data, predictions_df)
+                            for diag in diagnostics:
+                                st.caption(diag)
+
+                            st.markdown("#### Quick Fix:")
+                            st.code("""
+# Delete model cache (choose your platform):
+
+# Windows (Command Prompt):
+rmdir /s /q model_cache
+
+# Mac/Linux (Terminal):
+rm -rf model_cache
+
+# Then re-run the analysis
+                            """, language="bash")
+
+                    st.markdown("---")
+
+            except Exception as e:
+                logging.warning(f"Prediction validation failed: {e}")
+            # ================================================================
             
             # Stage 5: Advanced Price Forecasting
             status_text.text(stages[4][0] + "...")
@@ -1837,17 +2031,14 @@ def run_enhanced_comprehensive_analysis(selected_tickers: List[str], full_config
             
             forecast_results = {}
             if full_config.get('enable_enhanced_forecasting', True):
-                st.info("📊 Running Monte Carlo price simulations...")
                 forecaster = EnhancedPriceForecaster(horizon_days=30)
-                
+
                 for ticker in selected_tickers[:8]:  # Limit for performance
                     if ticker in raw_data:
                         try:
                             forecast_results[ticker] = forecaster.generate_enhanced_forecast(ticker, raw_data[ticker])
                         except Exception as e:
-                            st.warning(f"Price forecasting failed for {ticker}: {e}")
-                
-                st.success(f"✅ Price forecasting completed for {len(forecast_results)} stocks")
+                            st.warning(f"Forecast failed for {ticker}: {e}")
             
             # Stage 6: Advanced Risk Analysis
             status_text.text(stages[5][0] + "...")
@@ -1855,12 +2046,10 @@ def run_enhanced_comprehensive_analysis(selected_tickers: List[str], full_config
             
             risk_analysis = None
             if full_config.get('enable_risk_management', False) and RISK_MANAGEMENT_AVAILABLE:
-                st.info("🛡️ Conducting comprehensive risk analysis...")
                 try:
                     risk_config = risk_components['RiskConfig']()
                     risk_manager = risk_components['ComprehensiveRiskManager'](risk_config)
                     risk_analysis = risk_manager.analyze_portfolio_risk(predictions_df, raw_data)
-                    st.success("✅ Risk analysis completed")
                 except Exception as e:
                     st.warning(f"Risk analysis failed: {e}")
             
@@ -1870,35 +2059,29 @@ def run_enhanced_comprehensive_analysis(selected_tickers: List[str], full_config
             
             portfolio_optimization = None
             if full_config.get('enable_portfolio_optimization', False) and PORTFOLIO_OPTIMIZATION_AVAILABLE:
-                st.info("📈 Optimizing portfolio allocations...")
                 try:
                     portfolio_optimization = portfolio_components['optimize_portfolio_for_selected_stocks'](
                         predictions_df, raw_data, selected_tickers
                     )
-                    st.success("✅ Portfolio optimization completed")
                 except Exception as e:
                     st.warning(f"Portfolio optimization failed: {e}")
             
             # Stage 8: Sentiment Analysis (if enabled)
             sentiment_analysis = None
             if full_config.get('enable_sentiment_analysis', False) and SENTIMENT_AVAILABLE:
-                st.info("📰 Analyzing market sentiment...")
                 try:
                     sentiment_analysis = sentiment_components['get_sentiment_insights'](selected_tickers)
-                    st.success("✅ Sentiment analysis completed")
                 except Exception as e:
                     st.warning(f"Sentiment analysis failed: {e}")
             
             # Stage 9: Backtesting (if enabled)
             backtest_results = None
             if full_config.get('enable_backtesting', False) and BACKTESTING_AVAILABLE:
-                st.info("📈 Running historical backtesting...")
                 try:
                     config_obj = backtest_components['EnhancedBacktestConfig']()
                     strategy = backtest_components['MLStrategy'](models, config_obj)
                     engine = backtest_components['EnhancedBacktestEngine'](config_obj)
                     backtest_results = engine.run_backtest(raw_data, selected_tickers)
-                    st.success("✅ Backtesting completed")
                 except Exception as e:
                     st.warning(f"Backtesting failed: {e}")
             
@@ -1916,9 +2099,9 @@ def run_enhanced_comprehensive_analysis(selected_tickers: List[str], full_config
             # Clear progress indicators
             progress_bar.empty()
             status_text.empty()
-            
-            st.success("🎉 **Enhanced Analysis Completed Successfully!**")
-            
+
+            st.success("✅ **Analysis Complete**")
+
             # Display comprehensive results
             display_comprehensive_results(
                 predictions_df=predictions_df,
@@ -1956,14 +2139,10 @@ def run_enhanced_comprehensive_analysis(selected_tickers: List[str], full_config
             
     except Exception as e:
         st.error(f"❌ **Analysis Failed:** {str(e)}")
-        st.error("**Troubleshooting Steps:**")
-        st.error("1. 🔄 Try selecting fewer stocks (3-5 recommended)")
-        st.error("2. 🌐 Check your internet connection")
-        st.error("3. 💾 Clear browser cache and refresh")
-        st.error("4. ⚙️ Disable some advanced features and retry")
-        
+        st.info("Try selecting fewer stocks or check your internet connection")
+
         # Detailed error information for debugging
-        with st.expander("🔧 Technical Error Details", expanded=False):
+        with st.expander("🔧 Technical Details", expanded=False):
             st.code(f"Error: {str(e)}")
             st.code(f"Selected tickers: {selected_tickers}")
             st.code(f"Configuration: {full_config}")
@@ -2376,7 +2555,7 @@ def create_predictions_and_targets_tab(predictions_df: pd.DataFrame, price_targe
         # Display with styling
         st.dataframe(
             display_predictions,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             column_config={
                 "ticker": st.column_config.TextColumn("Stock", width="small"),
@@ -2410,8 +2589,8 @@ def create_predictions_and_targets_tab(predictions_df: pd.DataFrame, price_targe
             # Add quadrant lines
             fig.add_hline(y=0.7, line_dash="dash", line_color="gray", annotation_text="High Confidence Threshold")
             fig.add_vline(x=0.05, line_dash="dash", line_color="gray", annotation_text="Buy Threshold")
-            
-            st.plotly_chart(fig, use_container_width=True)
+
+            st.plotly_chart(fig, use_container_width=True, key="prediction_confidence_scatter")
     
     # Enhanced price targets
     if not price_targets_df.empty:
@@ -2454,7 +2633,8 @@ def create_predictions_and_targets_tab(predictions_df: pd.DataFrame, price_targe
             st.metric("Max Downside Risk", f"{min_downside:.1f}%")
         
         with col4:
-            high_confidence_targets = (price_targets_df['confidence'] > 0.7).sum()
+            # Confidence is 0-100 scale, so check if > 70
+            high_confidence_targets = (price_targets_df['confidence'] > 70).sum()
             st.metric("High Confidence Targets", high_confidence_targets)
         
         # Enhanced price targets table
@@ -2463,40 +2643,55 @@ def create_predictions_and_targets_tab(predictions_df: pd.DataFrame, price_targe
         display_targets['target_price'] = display_targets['target_price'].apply(lambda x: f"₹{x:.2f}")
         if percentage_col:
             display_targets[percentage_col] = display_targets[percentage_col].apply(lambda x: f"{x:.1f}%")
-        display_targets['confidence'] = display_targets['confidence'].apply(lambda x: f"{x:.1%}")
+        # Confidence is already 0-100, just add % sign
+        display_targets['confidence'] = display_targets['confidence'].apply(lambda x: f"{x:.1f}%")
         
+        # Build column config dynamically based on available columns
+        column_config = {
+            "ticker": "Stock",
+            "current_price": "Current Price",
+            "target_price": "Target Price",
+            "confidence": "Confidence",
+            "horizon": "Time Horizon"
+        }
+
+        # Add the percentage column if it exists
+        if percentage_col and percentage_col in display_targets.columns:
+            column_config[percentage_col] = "Expected Change"
+
         st.dataframe(
             display_targets,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
-            column_config={
-                "ticker": "Stock",
-                "current_price": "Current Price",
-                "target_price": "Target Price", 
-                "percentage_change": "Expected Change",
-                "confidence": "Confidence",
-                "horizon": "Time Horizon"
-            }
+            column_config=column_config
         )
         
         # Price target visualization
-        if len(display_targets) > 1:
+        if len(display_targets) > 1 and percentage_col:
+            # Calculate percentage change if not already present
+            if percentage_col not in price_targets_df.columns:
+                price_targets_df['percentage_change'] = (
+                    (price_targets_df['target_price'] - price_targets_df['current_price']) /
+                    price_targets_df['current_price'] * 100
+                )
+                percentage_col = 'percentage_change'
+
             fig = px.bar(
                 price_targets_df,
                 x='ticker',
-                y='percentage_change',
+                y=percentage_col,  # Use the dynamically found column
                 color='confidence',
                 title='Price Target Analysis by Stock',
                 labels={
                     'ticker': 'Stock',
-                    'percentage_change': 'Expected Price Change (%)',
+                    percentage_col: 'Expected Price Change (%)',
                     'confidence': 'Confidence Level'
                 },
                 color_continuous_scale='RdYlGn'
             )
-            
+
             fig.add_hline(y=0, line_dash="solid", line_color="black", line_width=1)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="predictions_price_target_bar")
 
 def create_interactive_charts_tab(raw_data: Dict, predictions_df: pd.DataFrame, price_targets_df: pd.DataFrame, selected_tickers: List[str]):
     """Create interactive charts and analysis"""
@@ -2592,9 +2787,9 @@ def create_interactive_charts_tab(raw_data: Dict, predictions_df: pd.DataFrame, 
                 height=800,
                 showlegend=True
             )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
+
+            st.plotly_chart(fig, width='stretch', key="technical_analysis_chart")
+
             # Additional analysis
             col1, col2 = st.columns(2)
             
@@ -2667,10 +2862,10 @@ def create_interactive_charts_tab(raw_data: Dict, predictions_df: pd.DataFrame, 
                 color='30-Day Return',
                 color_continuous_scale='RdYlGn'
             )
-            
+
             fig.add_hline(y=0, line_dash="solid", line_color="black", line_width=1)
-            st.plotly_chart(fig, use_container_width=True)
-            
+            st.plotly_chart(fig, width='stretch', key="portfolio_30day_return_chart")
+
             # Performance table
             display_df = portfolio_df.copy()
             display_df['30-Day Return'] = display_df['30-Day Return'].apply(lambda x: f"{x:.1%}")
@@ -2769,11 +2964,11 @@ def display_forecast_results(forecast_results: Dict, selected_tickers: List[str]
             
             # Add quadrant lines
             fig.add_hline(y=0, line_dash="dash", line_color="gray")
-            fig.add_vline(x=plot_df['volatility'].mean(), line_dash="dash", line_color="gray", 
+            fig.add_vline(x=plot_df['volatility'].mean(), line_dash="dash", line_color="gray",
                          annotation_text="Avg Portfolio Risk")
-            
-            st.plotly_chart(fig, use_container_width=True)
-    
+
+            st.plotly_chart(fig, width='stretch', key="forecast_risk_return_scatter")
+
     # Detailed scenarios for top stocks
     st.subheader("🎯 Detailed Scenario Analysis")
     
@@ -2819,10 +3014,10 @@ def display_forecast_results(forecast_results: Dict, selected_tickers: List[str]
                 labels={'Return_Value': 'Expected Return (%)'},
                 color_continuous_scale='RdYlGn'
             )
-            
+
             fig.add_hline(y=0, line_dash="solid", line_color="black", line_width=1)
-            st.plotly_chart(fig, use_container_width=True)
-        
+            st.plotly_chart(fig, width='stretch', key="scenario_analysis_chart")
+
         with col2:
             # Recommendation box
             rec = forecast['recommendation']
@@ -2955,9 +3150,9 @@ def display_sentiment_results(sentiment_analysis: Dict, selected_tickers: List[s
         fig.add_hline(y=0, line_dash="solid", line_color="black", line_width=1)
         fig.add_hline(y=0.1, line_dash="dash", line_color="green", annotation_text="Positive Threshold")
         fig.add_hline(y=-0.1, line_dash="dash", line_color="red", annotation_text="Negative Threshold")
-        
-        st.plotly_chart(fig, use_container_width=True)
-    
+
+        st.plotly_chart(fig, width='stretch', key="sentiment_analysis_chart")
+
     # Top positive and negative sentiments
     col1, col2 = st.columns(2)
     
@@ -3006,17 +3201,118 @@ def display_sentiment_results(sentiment_analysis: Dict, selected_tickers: List[s
         for rec in recommendations:
             st.info(rec)
 
+    # ==================== NEWS ARTICLES DISPLAY ====================
+    st.markdown("---")
+    st.header("📰 Detailed News Analysis")
+
+    # Button to fetch news
+    if 'news_articles' not in st.session_state:
+        if st.button("🔍 Fetch Latest News Articles (Last 30 Days)", use_container_width=True):
+            with st.spinner("Fetching news articles from NewsAPI..."):
+                try:
+                    import time
+                    news_data = {}
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+
+                    # Use multi-source aggregator for better coverage
+                    if SENTIMENT_AVAILABLE and 'MultiSourceNewsAggregator' in sentiment_components:
+                        aggregator = sentiment_components['MultiSourceNewsAggregator']()
+
+                        for i, ticker in enumerate(selected_tickers):
+                            try:
+                                # Get aggregated news from multiple sources
+                                articles = aggregator.get_aggregated_news(ticker, days=30, max_articles=30)
+                                news_data[ticker] = articles
+                            except Exception as e:
+                                logging.warning(f"Multi-source fetch failed for {ticker}: {e}")
+                                news_data[ticker] = []
+
+                            progress_bar.progress((i + 1) / len(selected_tickers))
+
+                    else:
+                        # Fallback to single source
+                        for i, ticker in enumerate(selected_tickers):
+                            if SENTIMENT_AVAILABLE and 'get_news_articles' in sentiment_components:
+                                articles = sentiment_components['get_news_articles'](ticker, days=30, max_articles=20)
+                                news_data[ticker] = articles
+                            else:
+                                news_data[ticker] = []
+
+                            progress_bar.progress((i + 1) / len(selected_tickers))
+                            time.sleep(0.3)  # Rate limiting
+
+                    st.session_state['news_articles'] = news_data
+                    progress_bar.empty()
+                    status_text.empty()
+
+                    total_articles = sum(len(articles) for articles in news_data.values())
+                    st.success(f"✅ Fetched {total_articles} articles")
+
+                except Exception as e:
+                    st.error(f"Error fetching news: {e}")
+    else:
+        if st.button("🔄 Refresh News Articles", use_container_width=True):
+            del st.session_state['news_articles']
+            st.rerun()
+
+    # Display news if available
+    if 'news_articles' in st.session_state:
+        news_data = st.session_state['news_articles']
+
+        # Create tabs for different views
+        news_tab1, news_tab2, news_tab3 = st.tabs([
+            "📊 Sentiment Comparison",
+            "📰 News Feed",
+            "📅 Timeline View"
+        ])
+
+        with news_tab1:
+            if SENTIMENT_AVAILABLE and 'display_sentiment_comparison' in sentiment_components:
+                sentiment_components['display_sentiment_comparison'](selected_tickers, news_data)
+            else:
+                st.info("Sentiment comparison not available")
+
+        with news_tab2:
+            # Stock selector for news feed
+            selected_stock_news = st.selectbox(
+                "Select stock to view news:",
+                selected_tickers,
+                key="news_feed_selector"
+            )
+
+            if selected_stock_news in news_data:
+                if SENTIMENT_AVAILABLE and 'display_news_feed' in sentiment_components:
+                    sentiment_components['display_news_feed'](selected_stock_news, news_data[selected_stock_news])
+                else:
+                    st.info("News feed display not available")
+
+        with news_tab3:
+            # Stock selector for timeline
+            selected_stock_timeline = st.selectbox(
+                "Select stock for timeline:",
+                selected_tickers,
+                key="news_timeline_selector"
+            )
+
+            if selected_stock_timeline in news_data:
+                if SENTIMENT_AVAILABLE and 'display_news_timeline' in sentiment_components:
+                    sentiment_components['display_news_timeline'](
+                        news_data[selected_stock_timeline],
+                        selected_stock_timeline
+                    )
+                else:
+                    st.info("News timeline not available")
+
 def create_portfolio_optimization_tab(portfolio_optimization: Dict, selected_tickers: List[str], config: Dict):
     """Enhanced portfolio optimization display"""
-    
+
     st.header("💼 Advanced Portfolio Optimization")
-    
+
     if not portfolio_optimization:
         st.warning("Portfolio optimization not available.")
         return
-    
-    st.success("✅ Portfolio optimization completed using Modern Portfolio Theory")
-    
+
     # Optimization results summary
     st.subheader("📊 Optimization Results")
     
@@ -3073,10 +3369,10 @@ def create_portfolio_optimization_tab(portfolio_optimization: Dict, selected_tic
             title='Optimal Portfolio Allocation',
             hover_data=['Allocation']
         )
-        
+
         fig.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig, use_container_width=True)
-        
+        st.plotly_chart(fig, width='stretch', key="portfolio_allocation_pie")
+
         # Allocation recommendations
         st.subheader("💡 Allocation Insights")
         
@@ -3099,15 +3395,25 @@ def create_risk_management_tab(risk_analysis: Dict, predictions_df: pd.DataFrame
     """Enhanced risk management and analysis display"""
     
     st.header("🛡️ Comprehensive Risk Management Analysis")
-    
-    if not risk_analysis:
-        st.warning("Advanced risk analysis not available.")
-        return
-    
-    st.success("✅ Comprehensive risk analysis completed")
-    
-    # Risk metrics overview
-    st.subheader("📊 Portfolio Risk Metrics")
+
+    # Use improved risk display for better user experience
+    try:
+        from utils.improved_risk_display import display_improved_risk_metrics
+
+        display_improved_risk_metrics(risk_analysis, predictions_df)
+
+    except ImportError:
+        # Fallback to basic display if improved version not available
+        st.caption("Using standard risk display")
+
+        if not risk_analysis:
+            st.warning("Advanced risk analysis not available.")
+            return
+
+        st.success("✅ Comprehensive risk analysis completed")
+
+        # Risk metrics overview
+        st.subheader("📊 Portfolio Risk Metrics")
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -3159,10 +3465,10 @@ def create_risk_management_tab(risk_analysis: Dict, predictions_df: pd.DataFrame
                     color_continuous_scale='RdYlGn_r',
                     aspect="auto"
                 )
-                
+
                 fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
-                
+                st.plotly_chart(fig, width='stretch', key="correlation_heatmap")
+
                 # Correlation insights
                 high_correlations = []
                 for i in range(len(correlation_df.columns)):
@@ -3742,11 +4048,12 @@ def main():
                 'Accuracy': [0.78, 0.76, 0.73, 0.75, 0.82],
                 'Confidence': [0.85, 0.83, 0.80, 0.77, 0.88]
             })
-            
+
+
             fig = px.bar(sample_performance, x='Model', y='Accuracy', color='Confidence',
                         title='AI Model Performance Comparison', color_continuous_scale='Viridis')
-            st.plotly_chart(fig, use_container_width=True)
-        
+            st.plotly_chart(fig, width='stretch', key="model_performance_comparison")
+
         with feature_tabs[1]:
             st.markdown("""
             #### Monte Carlo Price Forecasting
@@ -3971,12 +4278,12 @@ if __name__ == "__main__":
                             
                             # Simple price chart
                             fig = px.line(
-                                df.reset_index(), 
-                                x='Date', 
-                                y='Close', 
+                                df.reset_index(),
+                                x='Date',
+                                y='Close',
                                 title=f'{ticker} - Price Chart (1 Year)'
                             )
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, width='stretch', key=f"emergency_chart_{ticker}")
                 else:
                     st.error("❌ Emergency analysis failed - no data could be loaded")
                     

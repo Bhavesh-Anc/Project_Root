@@ -107,11 +107,11 @@ class AdvancedSentimentAnalyzer:
         net_sentiment = (positive_weight - negative_weight) * 10  # Amplify signal
         return max(-1.0, min(1.0, net_sentiment))
     
-    def get_ticker_sentiment(self, ticker: str, days: int = 7) -> float:
+    def get_ticker_sentiment(self, ticker: str, days: int = 30) -> float:
         """Get sentiment score for a specific ticker with enhanced analysis"""
         # Remove .NS/.BO suffix for news search and add company context
         search_ticker = ticker.replace('.NS', '').replace('.BO', '')
-        
+
         # Try multiple search queries for better coverage
         search_queries = [
             search_ticker,
@@ -119,23 +119,23 @@ class AdvancedSentimentAnalyzer:
             f"{search_ticker} shares",
             f"{search_ticker} earnings"
         ]
-        
+
         all_sentiments = []
-        
+
         for query in search_queries:
             articles = self.fetch_news(query, days)
             if not articles:
                 continue
-            
+
             for article in articles:
                 title = article.get('title', '')
                 description = article.get('description', '')
                 content = f"{title} {description}"
-                
+
                 # Filter relevant articles (containing ticker name)
                 if search_ticker.lower() in content.lower():
                     sentiment = self.analyze_text_sentiment(content)
-                    
+
                     # Weight recent articles more heavily
                     published_at = article.get('publishedAt', '')
                     try:
@@ -146,16 +146,83 @@ class AdvancedSentimentAnalyzer:
                         all_sentiments.append(weighted_sentiment)
                     except:
                         all_sentiments.append(sentiment)
-        
+
         if not all_sentiments:
             logging.info(f"No relevant sentiment data found for {ticker}")
             return 0.0
-        
+
         # Calculate weighted average sentiment
         final_sentiment = np.mean(all_sentiments)
-        
+
         logging.info(f"Sentiment for {ticker}: {final_sentiment:.3f} (based on {len(all_sentiments)} articles)")
         return final_sentiment
+
+    def get_ticker_news_with_sentiment(self, ticker: str, days: int = 30, max_articles: int = 20) -> List[Dict]:
+        """Get news articles with sentiment scores for a ticker"""
+        # Remove .NS/.BO suffix for news search
+        search_ticker = ticker.replace('.NS', '').replace('.BO', '')
+
+        # Try multiple search queries
+        search_queries = [
+            search_ticker,
+            f"{search_ticker} stock",
+            f"{search_ticker} shares"
+        ]
+
+        all_articles = []
+        seen_titles = set()  # Avoid duplicates
+
+        for query in search_queries:
+            articles = self.fetch_news(query, days)
+            if not articles:
+                continue
+
+            for article in articles:
+                title = article.get('title', '')
+
+                # Skip duplicates
+                if title in seen_titles or not title:
+                    continue
+
+                description = article.get('description', '')
+                content = f"{title} {description}"
+
+                # Filter relevant articles
+                if search_ticker.lower() in content.lower():
+                    sentiment = self.analyze_text_sentiment(content)
+
+                    # Classify sentiment
+                    if sentiment > 0.1:
+                        sentiment_label = '🟢 Positive'
+                    elif sentiment < -0.1:
+                        sentiment_label = '🔴 Negative'
+                    else:
+                        sentiment_label = '🟡 Neutral'
+
+                    article_data = {
+                        'title': title,
+                        'description': description or 'No description available',
+                        'url': article.get('url', ''),
+                        'source': article.get('source', {}).get('name', 'Unknown'),
+                        'published_at': article.get('publishedAt', ''),
+                        'sentiment_score': round(sentiment, 3),
+                        'sentiment_label': sentiment_label,
+                        'image_url': article.get('urlToImage', '')
+                    }
+
+                    all_articles.append(article_data)
+                    seen_titles.add(title)
+
+                    if len(all_articles) >= max_articles:
+                        break
+
+            if len(all_articles) >= max_articles:
+                break
+
+        # Sort by date (newest first)
+        all_articles.sort(key=lambda x: x['published_at'], reverse=True)
+
+        return all_articles[:max_articles]
     
     def get_market_sentiment(self, tickers: List[str]) -> Dict[str, float]:
         """Get sentiment scores for multiple tickers (optimized for user selection)"""
@@ -227,9 +294,9 @@ class AdvancedSentimentAnalyzer:
         logging.info("Sentiment cache cleared")
 
 # Enhanced helper functions for integration
-def get_sentiment_for_selected_stocks(selected_tickers: List[str], 
+def get_sentiment_for_selected_stocks(selected_tickers: List[str],
                                     api_key: str = None,
-                                    days: int = 7) -> Dict[str, float]:
+                                    days: int = 30) -> Dict[str, float]:
     """
     Convenience function to get sentiment for user-selected stocks
     
@@ -248,16 +315,32 @@ def get_sentiment_insights(selected_tickers: List[str],
                          api_key: str = None) -> Dict[str, any]:
     """
     Get comprehensive sentiment insights for selected stocks
-    
+
     Args:
         selected_tickers: List of user-selected stock tickers
         api_key: News API key (optional)
-    
+
     Returns:
         Comprehensive sentiment analysis results
     """
     analyzer = AdvancedSentimentAnalyzer(api_key)
     return analyzer.get_sentiment_summary(selected_tickers)
+
+def get_news_articles(ticker: str, api_key: str = None, days: int = 30, max_articles: int = 20) -> List[Dict]:
+    """
+    Get news articles with sentiment for a specific ticker
+
+    Args:
+        ticker: Stock ticker symbol
+        api_key: News API key (optional)
+        days: Number of days to look back (default 30)
+        max_articles: Maximum number of articles to return (default 20)
+
+    Returns:
+        List of news articles with sentiment scores
+    """
+    analyzer = AdvancedSentimentAnalyzer(api_key)
+    return analyzer.get_ticker_news_with_sentiment(ticker, days, max_articles)
 
 # Example usage
 if __name__ == "__main__":

@@ -126,6 +126,7 @@ class EnhancedBacktestConfig:
     
     # Advanced risk settings
     var_confidence_level: float = 0.95
+    var_confidence: float = 0.95  # Alias for var_confidence_level for backward compatibility
     kelly_cap: float = 0.25
     stress_test_frequency: int = 5
     risk_budget_limit: float = 0.2

@@ -954,36 +954,53 @@ def generate_price_targets_for_selected(models: Dict[str, Any],
 
 # ==================== MODEL PERSISTENCE ====================
 
-def save_models_optimized(models: Dict[str, Any], cache_dir: str = "model_cache") -> bool:
-    """Save models with optimized storage"""
-    
+def save_models_optimized(models: Dict[str, Any], cache_dir: str = "model_cache", feature_count: int = None) -> bool:
+    """Save models with optimized storage
+
+    Args:
+        models: Dictionary of models to save
+        cache_dir: Directory to save models
+        feature_count: Number of features the models were trained with (optional)
+    """
+
     try:
         os.makedirs(cache_dir, exist_ok=True)
-        
+
+        # Extract feature count from first model if not provided
+        if feature_count is None:
+            for ticker, ticker_models in models.items():
+                for model_key, predictor in ticker_models.items():
+                    if hasattr(predictor, 'selected_features') and predictor.selected_features:
+                        feature_count = len(predictor.selected_features)
+                        break
+                if feature_count:
+                    break
+
         for ticker, ticker_models in models.items():
             ticker_dir = os.path.join(cache_dir, ticker)
             os.makedirs(ticker_dir, exist_ok=True)
-            
+
             for model_key, predictor in ticker_models.items():
                 model_path = os.path.join(ticker_dir, f"{model_key}.pkl")
-                
+
                 with open(model_path, 'wb') as f:
                     pickle.dump(predictor, f, protocol=pickle.HIGHEST_PROTOCOL)
-        
-        # Save metadata
+
+        # Save metadata including feature count
         metadata = {
             'timestamp': datetime.now().isoformat(),
             'n_tickers': len(models),
-            'n_models': sum(len(model_dict) for model_dict in models.values())
+            'n_models': sum(len(model_dict) for model_dict in models.values()),
+            'feature_count': feature_count
         }
-        
+
         metadata_path = os.path.join(cache_dir, 'metadata.json')
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f)
-        
-        logging.info(f"Saved {metadata['n_models']} models to {cache_dir}")
+
+        logging.info(f"Saved {metadata['n_models']} models to {cache_dir} (feature_count: {feature_count})")
         return True
-        
+
     except Exception as e:
         logging.error(f"Model saving failed: {e}")
         return False

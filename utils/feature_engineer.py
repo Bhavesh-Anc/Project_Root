@@ -884,6 +884,176 @@ def create_features_parallel_safe(data_dict: Dict[str, pd.DataFrame],
     
     return results
 
+# ==================== FUNDAMENTAL FEATURES INTEGRATION ====================
+
+def add_fundamental_features(df: pd.DataFrame, ticker: str, config: Dict = None) -> pd.DataFrame:
+    """
+    Add fundamental features from advanced data sources to technical features
+
+    Args:
+        df: DataFrame with technical features
+        ticker: Stock ticker symbol
+        config: Configuration dictionary
+
+    Returns:
+        DataFrame with fundamental features added
+    """
+    try:
+        from utils.advanced_data_sources import AdvancedDataAggregator
+        config = config or {}
+
+        # Check if fundamentals are enabled
+        if not config.get('enable_fundamentals', True):
+            return df
+
+        # Get fundamental data
+        aggregator = AdvancedDataAggregator()
+        fund_data = aggregator.get_complete_data(ticker)
+
+        if not fund_data or not fund_data.get('fundamentals'):
+            logging.warning(f"No fundamental data available for {ticker}, using defaults")
+            # Add default neutral values
+            df['fundamental_score'] = 50.0
+            df['insider_score'] = 0.0
+            df['institutional_score'] = 5.0
+            return df
+
+        # Extract fundamental features
+        fundamentals = fund_data.get('fundamentals', {})
+
+        # Valuation metrics
+        df['pe_ratio'] = fundamentals.get('pe_ratio', 20.0)
+        df['forward_pe'] = fundamentals.get('forward_pe', 20.0)
+        df['pb_ratio'] = fundamentals.get('price_to_book', 3.0)
+        df['ps_ratio'] = fundamentals.get('price_to_sales', 2.0)
+        df['peg_ratio'] = fundamentals.get('peg_ratio', 1.5)
+        df['ev_to_ebitda'] = fundamentals.get('ev_to_ebitda', 10.0)
+
+        # Profitability metrics
+        df['profit_margin'] = fundamentals.get('profit_margin', 0.10)
+        df['operating_margin'] = fundamentals.get('operating_margin', 0.10)
+        df['gross_margin'] = fundamentals.get('gross_margin', 0.30)
+        df['roe'] = fundamentals.get('roe', 0.15)
+        df['roa'] = fundamentals.get('roa', 0.05)
+
+        # Growth metrics
+        df['revenue_growth'] = fundamentals.get('revenue_growth', 0.05)
+        df['earnings_growth'] = fundamentals.get('earnings_growth', 0.05)
+        df['earnings_quarterly_growth'] = fundamentals.get('earnings_quarterly_growth', 0.05)
+
+        # Financial health
+        df['current_ratio'] = fundamentals.get('current_ratio', 1.5)
+        df['quick_ratio'] = fundamentals.get('quick_ratio', 1.0)
+        df['debt_to_equity'] = fundamentals.get('debt_to_equity', 1.0)
+
+        # Market metrics
+        df['beta'] = fundamentals.get('beta', 1.0)
+        df['dividend_yield'] = fundamentals.get('dividend_yield', 0.0)
+        df['payout_ratio'] = fundamentals.get('payout_ratio', 0.30)
+        df['short_percent_float'] = fundamentals.get('short_percent_float', 0.0)
+
+        # Composite scores
+        df['fundamental_score'] = fund_data.get('fundamental_score', 50.0)
+        df['insider_score'] = fund_data.get('insider_activity', {}).get('score', 0.0)
+        df['institutional_score'] = fund_data.get('institutional', {}).get('ownership_score', 5.0)
+
+        # Derived features
+        df['value_score'] = 0.0  # Will be calculated below
+        df['quality_score'] = 0.0
+        df['growth_score'] = 0.0
+
+        # Calculate value score (lower P/E, P/B is better)
+        if df['pe_ratio'].iloc[0] > 0:
+            df['value_score'] = 100 / (1 + df['pe_ratio'] / 10)  # Normalize
+
+        # Calculate quality score (higher margins and ROE is better)
+        df['quality_score'] = (
+            df['profit_margin'] * 100 * 0.3 +
+            df['roe'] * 100 * 0.4 +
+            df['current_ratio'] * 10 * 0.3
+        )
+
+        # Calculate growth score (higher growth is better)
+        df['growth_score'] = (
+            df['revenue_growth'] * 100 * 0.5 +
+            df['earnings_growth'] * 100 * 0.5
+        )
+
+        # Fill any NaN values with defaults
+        fundamental_cols = [
+            'pe_ratio', 'forward_pe', 'pb_ratio', 'ps_ratio', 'peg_ratio', 'ev_to_ebitda',
+            'profit_margin', 'operating_margin', 'gross_margin', 'roe', 'roa',
+            'revenue_growth', 'earnings_growth', 'earnings_quarterly_growth',
+            'current_ratio', 'quick_ratio', 'debt_to_equity',
+            'beta', 'dividend_yield', 'payout_ratio', 'short_percent_float',
+            'fundamental_score', 'insider_score', 'institutional_score',
+            'value_score', 'quality_score', 'growth_score'
+        ]
+
+        for col in fundamental_cols:
+            if col in df.columns:
+                df[col] = df[col].fillna(df[col].median() if df[col].notna().any() else 0)
+
+        logging.info(f"✓ Added fundamental features for {ticker}")
+        return df
+
+    except ImportError:
+        logging.warning(f"advanced_data_sources module not available, skipping fundamental features")
+        return df
+    except Exception as e:
+        logging.error(f"Error adding fundamental features for {ticker}: {e}")
+        # Return with default values to not break the pipeline
+        df['fundamental_score'] = 50.0
+        df['insider_score'] = 0.0
+        df['institutional_score'] = 5.0
+        return df
+
+
+def engineer_features_with_fundamentals(data_dict: Dict[str, pd.DataFrame],
+                                       config: Dict = None,
+                                       use_cache: bool = True,
+                                       parallel: bool = True,
+                                       selected_tickers: List[str] = None,
+                                       include_fundamentals: bool = True) -> Dict[str, pd.DataFrame]:
+    """
+    Enhanced feature engineering with fundamental data integration
+
+    Args:
+        data_dict: Dictionary of ticker -> price DataFrame
+        config: Configuration dictionary
+        use_cache: Whether to use caching
+        parallel: Whether to use parallel processing
+        selected_tickers: List of tickers to process
+        include_fundamentals: Whether to include fundamental features
+
+    Returns:
+        Dictionary of ticker -> features DataFrame
+    """
+    # First, create technical features
+    print("Step 1: Creating technical features...")
+    features_dict = engineer_features_enhanced(
+        data_dict, config, use_cache, parallel, selected_tickers
+    )
+
+    # Then add fundamental features if enabled
+    if include_fundamentals:
+        print("\nStep 2: Adding fundamental features...")
+        from tqdm import tqdm
+
+        for ticker in tqdm(features_dict.keys(), desc="Adding fundamentals"):
+            if not features_dict[ticker].empty:
+                try:
+                    features_dict[ticker] = add_fundamental_features(
+                        features_dict[ticker], ticker, config
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to add fundamentals for {ticker}: {e}")
+
+        print("✓ Fundamental features added successfully")
+
+    return features_dict
+
+
 # ==================== MAIN INTERFACE FUNCTIONS ====================
 
 def engineer_features_enhanced(data_dict: Dict[str, pd.DataFrame],

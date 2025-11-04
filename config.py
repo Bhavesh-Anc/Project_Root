@@ -350,6 +350,35 @@ INTEGRATION_CONFIG = {
     }
 }
 
+# Advanced data sources configuration
+ADVANCED_DATA_CONFIG = {
+    'enable_fundamentals': True,
+    'enable_economic_indicators': True,
+    'enable_insider_trading': True,
+    'enable_institutional_data': True,
+    'cache_duration_hours': 24,
+    'fundamentals_cache_db': 'data/fundamentals_cache.db',
+    'parallel_fetching': True,
+    'max_workers': 4,
+    'fundamental_features': [
+        'pe_ratio', 'forward_pe', 'pb_ratio', 'ps_ratio',
+        'profit_margin', 'operating_margin', 'roe', 'roa',
+        'revenue_growth', 'earnings_growth', 'current_ratio',
+        'debt_to_equity', 'dividend_yield', 'beta'
+    ],
+    'economic_indicators': [
+        'treasury_rates', 'market_indices', 'market_regime'
+    ],
+    'insider_lookback_days': 90,
+    'min_fundamental_score': 30,  # Minimum score to consider a stock
+    'weight_fundamental_score': 0.3,  # Weight in final decision (30%)
+    'weight_technical_score': 0.5,    # Weight in final decision (50%)
+    'weight_sentiment_score': 0.2,    # Weight in final decision (20%)
+    'update_frequency': 'daily',
+    'fallback_enabled': True,  # Use neutral values if data unavailable
+    'retry_attempts': 3
+}
+
 # Machine learning specific configuration
 ML_CONFIG = {
     'auto_feature_selection': True,
@@ -388,6 +417,7 @@ CONFIG = {
     'notification': NOTIFICATION_CONFIG,
     'deployment': DEPLOYMENT_CONFIG,
     'integration': INTEGRATION_CONFIG,
+    'advanced_data': ADVANCED_DATA_CONFIG,
     'ml': ML_CONFIG
 }
 
@@ -459,7 +489,7 @@ __all__ = [
     'CONFIG',
     'secrets',
     'DATABASE_CONFIG',
-    'MODEL_CONFIG', 
+    'MODEL_CONFIG',
     'APP_CONFIG',
     'STOCK_SELECTION_CONFIG',
     'DATA_CONFIG',
@@ -470,6 +500,8 @@ __all__ = [
     'RISK_CONFIG',
     'VISUALIZATION_CONFIG',
     'PERFORMANCE_CONFIG',
+    'ADVANCED_DATA_CONFIG',
+    'ML_CONFIG',
     'validate_config',
     'get_config_summary',
     'update_config'
